@@ -2,4 +2,6 @@
 # Simple run script for addon/container: start FastAPI via Uvicorn
 set -e
 echo "Starting e-face API..."
+
+cd /app/backend
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000
