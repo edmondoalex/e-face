@@ -1,0 +1,799 @@
+import os
+import json
+import asyncio
+import re
+from fastapi import Header, HTTPException
+from datetime import datetime, timedelta
+import jwt
+import logging
+from typing import List
+import time
+
+from .registry_cache import get_registry_snapshot, set_registry_snapshot
+
+API_TOKEN = os.environ.get("EFACE_API_TOKEN", "devtoken123")
+JWT_SECRET = os.environ.get("EFACE_JWT_SECRET", "dev_jwt_secret_change_me")
+JWT_ALGORITHM = "HS256"
+# Default JWT expiry in minutes. Set to ~3 months (129600 minutes) by default.
+JWT_EXPIRES_MINUTES = int(os.environ.get("EFACE_JWT_EXP_MIN", "129600"))
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "config_store.json")
+REGISTRY_CACHE_TTL = max(0, int(os.environ.get("EFACE_REGISTRY_TTL", "0")))
+
+
+def read_config():
+    if not os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "w") as f:
+            json.dump({"site_name": "e-face demo", "advanced": {}, "devices": [], "users": [], "admin": {"username": "admin", "password_hash": ""}}, f)
+    with open(CONFIG_PATH, "r") as f:
+        return json.load(f)
+
+
+def write_config(data):
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def create_access_token(subject: str, is_admin: bool = False, must_change: bool = False, expires_minutes: int | None = None):
+    now = datetime.utcnow()
+    if expires_minutes is None:
+        # ensure a sane default even if environment variable was set to 0
+        expires_minutes = JWT_EXPIRES_MINUTES if (isinstance(JWT_EXPIRES_MINUTES, int) and JWT_EXPIRES_MINUTES > 0) else 60
+    exp = now + timedelta(minutes=expires_minutes)
+    # PyJWT accepts datetimes for exp, but normalize to UTC timestamp for clarity
+    payload = {"sub": subject, "is_admin": bool(is_admin), "must_change": bool(must_change), "exp": int(exp.timestamp())}
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return token
+
+
+def decode_access_token(token: str):
+    logger = logging.getLogger('e-face.core')
+    try:
+        # allow small clock skew (leeway) to tolerate minor time differences
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM], leeway=30)
+        logger.debug('Decoded JWT payload: %s', payload)
+        return payload
+    except jwt.ExpiredSignatureError as e:
+        logger.info('JWT expired: %s', e)
+        # log token expiry vs server time for debugging
+        try:
+            import time
+            raw = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+            exp = int(raw.get('exp', 0))
+            logger.info('Token exp claim: %s, server_time: %s', exp, int(time.time()))
+        except Exception:
+            logger.debug('Could not decode token for exp inspection')
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.warning('Invalid JWT token: %s', e)
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+    except Exception as e:
+        logger.exception('Unexpected error decoding token: %s', e)
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def require_token(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    if authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+    else:
+        token = authorization
+
+    # allow legacy API_TOKEN for compatibility
+    if token == API_TOKEN:
+        return {"sub": "service", "is_admin": False}
+
+    payload = decode_access_token(token)
+    return payload
+
+
+def verify_admin_password(password: str) -> bool:
+    # read stored hash from config and compare sha256
+    import hashlib
+    data = read_config()
+    admin = data.get("admin", {})
+    stored = admin.get("password_hash")
+    if not stored:
+        return False
+    h = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    return h == stored
+
+
+def hash_password(password: str) -> str:
+    import hashlib
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+
+def get_user(username: str):
+    data = read_config()
+    users = data.get('users', [])
+    for u in users:
+        if u.get('username') == username:
+            return u
+    return None
+
+
+def create_user(username: str, password: str, must_change: bool = True, is_admin: bool = False):
+    data = read_config()
+    users = data.get('users', [])
+    if any(u.get('username') == username for u in users):
+        return False
+    users.append({
+        'username': username,
+        'password_hash': hash_password(password),
+        'must_change': bool(must_change),
+        'is_admin': bool(is_admin)
+    })
+    data['users'] = users
+    write_config(data)
+    return True
+
+
+def verify_user_password(username: str, password: str) -> bool:
+    u = get_user(username)
+    if not u:
+        return False
+    return hash_password(password) == u.get('password_hash')
+
+
+def set_user_password(username: str, new_password: str, must_change: bool = False):
+    data = read_config()
+    users = data.get('users', [])
+    for u in users:
+        if u.get('username') == username:
+            u['password_hash'] = hash_password(new_password)
+            u['must_change'] = bool(must_change)
+            data['users'] = users
+            write_config(data)
+            return True
+    return False
+
+
+def load_registry_snapshot(integration: dict, allow_ws_fallback: bool = True) -> dict:
+    """Load Home Assistant area/device/entity registries.
+    Prefers cached data, then REST endpoints, finally websocket fallback when necessary.
+    """
+    import requests
+    cached = get_registry_snapshot()
+    ttl = REGISTRY_CACHE_TTL
+    if cached and ttl > 0:
+        ts = cached.get('ts')
+        if isinstance(ts, (int, float)) and (time.time() - ts) < ttl:
+            return cached
+    if not integration:
+        raise Exception("integration not configured")
+    host = integration.get('host')
+    token = integration.get('token')
+    if not host or not token:
+        raise Exception("integration missing host or token")
+
+    base = host.rstrip('/')
+    headers = {
+        'Authorization': f"Bearer {token}",
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    }
+
+    def _fetch(path: str, fallback_path: str | None = None):
+        url = base + path
+        try:
+            resp = requests.post(url, headers=headers, json={}, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json() or []
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+        if fallback_path:
+            try:
+                resp = requests.get(base + fallback_path, headers=headers, timeout=8)
+                if resp.status_code == 200:
+                    data = resp.json() or []
+                    if isinstance(data, list):
+                        return data
+            except Exception:
+                pass
+        return []
+
+    areas_raw = _fetch('/api/config/area_registry/list', '/api/areas')
+    devices_raw = _fetch('/api/config/device_registry/list', '/api/devices')
+    entities_raw = _fetch('/api/config/entity_registry/list', '/api/config/entity_registry/list')
+
+    if areas_raw or devices_raw or entities_raw:
+        snapshot = _compose_registry_snapshot(areas_raw, devices_raw, entities_raw)
+        set_registry_snapshot(snapshot)
+        return snapshot
+
+    if allow_ws_fallback:
+        snapshot = _fetch_registry_via_ws(host, token)
+        if snapshot:
+            set_registry_snapshot(snapshot)
+            return snapshot
+
+    if cached:
+        return cached
+
+    snapshot = _compose_registry_snapshot([], [], [])
+    set_registry_snapshot(snapshot)
+    return snapshot
+
+
+def _compose_registry_snapshot(areas_raw, devices_raw, entities_raw):
+    area_map = {}
+    for area in areas_raw or []:
+        area_id = area.get('area_id') or area.get('id') or area.get('slug')
+        if not area_id:
+            continue
+        area_map[area_id] = area.get('name') or area_id
+
+    device_map = {}
+    for dev in devices_raw or []:
+        dev_id = dev.get('id') or dev.get('device_id')
+        if not dev_id:
+            continue
+        device_map[dev_id] = {
+            'name': dev.get('name') or dev.get('name_by_user') or dev.get('original_name') or dev_id,
+            'area_id': dev.get('area_id') or dev.get('area')
+        }
+
+    entity_map = {}
+    for ent in entities_raw or []:
+        ent_id = ent.get('entity_id')
+        if not ent_id:
+            continue
+        entity_map[ent_id] = {
+            'device_id': ent.get('device_id'),
+            'area_id': ent.get('area_id') or ent.get('area'),
+            'hidden_by': ent.get('hidden_by') or ent.get('entity_registry_hidden_by'),
+            'entity_category': ent.get('entity_category'),
+            'original_name': ent.get('original_name') or ent.get('name'),
+            'labels': ent.get('labels') or []
+        }
+
+    table = []
+    for ent_id, meta in entity_map.items():
+        dev_id = meta.get('device_id')
+        dev = device_map.get(dev_id) if dev_id else None
+        resolved_area = meta.get('area_id') or (dev.get('area_id') if dev else None)
+        table.append({
+            'entity_id': ent_id,
+            'device_id': dev_id,
+            'device_name': (dev or {}).get('name'),
+            'area_id': resolved_area,
+            'area_name': area_map.get(resolved_area)
+        })
+
+    return {
+        'areas': area_map,
+        'devices': device_map,
+        'entities': entity_map,
+        'table': table
+    }
+
+
+def _fetch_registry_via_ws(host: str, token: str) -> dict | None:
+    import json
+    try:
+        import websockets
+    except Exception:
+        return None
+
+    if not host or not token:
+        return None
+
+    if host.startswith('https://'):
+        ws_url = 'wss://' + host[len('https://'):]
+    elif host.startswith('http://'):
+        ws_url = 'ws://' + host[len('http://'):]
+    else:
+        ws_url = 'ws://' + host
+    ws_url = ws_url.rstrip('/') + '/api/websocket'
+
+    async def _collect():
+        async with websockets.connect(ws_url, ping_interval=15, ping_timeout=10) as ws:
+            try:
+                await ws.recv()  # auth_required
+            except Exception:
+                pass
+            await ws.send(json.dumps({'type': 'auth', 'access_token': token}))
+            auth_resp = json.loads(await ws.recv())
+            if auth_resp.get('type') != 'auth_ok':
+                return None
+
+            reg_map = {
+                'areas': ('config/area_registry/list', 7001),
+                'devices': ('config/device_registry/list', 7002),
+                'entities': ('config/entity_registry/list', 7003)
+            }
+            for cmd, ident in [(v[0], v[1]) for v in reg_map.values()]:
+                await ws.send(json.dumps({'id': ident, 'type': cmd}))
+
+            pending = {v[1]: k for k, v in reg_map.items()}
+            results = {k: [] for k in reg_map.keys()}
+
+            while pending:
+                msg = await asyncio.wait_for(ws.recv(), timeout=10)
+                data = json.loads(msg)
+                if data.get('type') == 'result' and data.get('id') in pending:
+                    key = pending.pop(data['id'])
+                    results[key] = data.get('result') or []
+
+            return _compose_registry_snapshot(results['areas'], results['devices'], results['entities'])
+
+    try:
+        return asyncio.run(_collect())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_collect())
+        finally:
+            loop.close()
+    except Exception:
+        return None
+
+
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(value)
+
+
+def _collect_labels(*sources) -> list[str]:
+    labels: list[str] = []
+    for source in sources:
+        if not source:
+            continue
+        items = source if isinstance(source, (list, tuple, set)) else [source]
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            val = item.strip()
+            if not val:
+                continue
+            normalized = val.lower()
+            if normalized not in labels:
+                labels.append(normalized)
+                alias = normalized.replace('_', '-').strip('-')
+                if alias and alias not in labels:
+                    labels.append(alias)
+    return labels
+
+
+def _should_hide_entity(attrs: dict, registry_entry: dict | None, labels: list[str]) -> bool:
+    attrs = attrs or {}
+    registry_entry = registry_entry or {}
+    if _truthy(attrs.get('hidden')):
+        return True
+    visible = attrs.get('visible')
+    if visible is not None and not _truthy(visible):
+        return True
+    attr_hidden_by = attrs.get('entity_registry_hidden_by') or attrs.get('hidden_by')
+    if attr_hidden_by:
+        return True
+    attr_visible = attrs.get('entity_registry_visible')
+    if attr_visible is not None and not _truthy(attr_visible):
+        return True
+    hidden_by = registry_entry.get('hidden_by')
+    if hidden_by:
+        return True
+    if 'hidden' in labels:
+        return True
+    return False
+
+
+def _resolve_room_for_entity(registry_entry: dict | None, attrs: dict | None, device_map: dict) -> str | None:
+    attrs = attrs or {}
+    registry_entry = registry_entry or {}
+    area_id = registry_entry.get('area_id') or attrs.get('area_id')
+    if area_id:
+        return area_id
+    device_id = registry_entry.get('device_id')
+    if device_id and device_map.get(device_id):
+        return device_map[device_id].get('area_id')
+    return None
+
+
+def _normalize_room_hint(value: str | None) -> str | None:
+    if not value:
+        return None
+    slug = re.sub(r'[^a-z0-9]+', '_', value.lower()).strip('_')
+    return slug or value.strip().lower()
+
+
+def _room_hint_from_labels(labels: list[str]) -> str | None:
+    if not labels:
+        return None
+    prefixes = ('room:', 'room=', 'area:', 'area=')
+    for label in labels:
+        if not isinstance(label, str):
+            continue
+        trimmed = label.strip().lower()
+        for prefix in prefixes:
+            if trimmed.startswith(prefix):
+                remainder = trimmed[len(prefix):].strip()
+                hint = _normalize_room_hint(remainder)
+                if hint:
+                    return hint
+    return None
+
+
+def _append_light_scene(entity_id: str, domain: str, attrs: dict, registry_entry: dict, labels: list[str], device_map: dict, scenes_by_room: dict, fallback: list):
+    if not entity_id or domain not in {'button', 'input_button', 'scene'}:
+        return
+    if 'light-scene' not in labels:
+        return
+    if _should_hide_entity(attrs, registry_entry, labels):
+        return
+    room_id = _resolve_room_for_entity(registry_entry, attrs, device_map)
+    if not room_id:
+        room_id = _room_hint_from_labels(labels)
+    scene = {
+        'id': entity_id,
+        'name': attrs.get('friendly_name') or registry_entry.get('original_name') or entity_id,
+        'icon': attrs.get('icon'),
+        'domain': domain,
+        'service': 'press' if domain in {'button', 'input_button'} else 'turn_on'
+    }
+    target = scenes_by_room.setdefault(room_id, []) if room_id else fallback
+    target.append(scene)
+
+
+def _gather_light_scenes(state_map: dict, entity_registry: dict, device_map: dict):
+    scenes_by_room: dict[str | None, list] = {}
+    fallback: list = []
+    processed: set[str] = set()
+
+    for entity_id, ent in state_map.items():
+        if not entity_id:
+            continue
+        domain = entity_id.split('.', 1)[0]
+        attrs = (ent or {}).get('attributes') or {}
+        registry_entry = entity_registry.get(entity_id) or {}
+        labels = _collect_labels(attrs.get('labels'), attrs.get('tags'), registry_entry.get('labels'))
+        _append_light_scene(entity_id, domain, attrs, registry_entry, labels, device_map, scenes_by_room, fallback)
+        processed.add(entity_id)
+
+    for entity_id, registry_entry in (entity_registry or {}).items():
+        if not entity_id or entity_id in processed:
+            continue
+        domain = entity_id.split('.', 1)[0]
+        labels = _collect_labels(registry_entry.get('labels'))
+        attrs = {}
+        _append_light_scene(entity_id, domain, attrs, registry_entry or {}, labels, device_map, scenes_by_room, fallback)
+
+    return scenes_by_room, fallback
+
+
+def _has_valid_room_templates(room_templates: list | None) -> bool:
+    if not room_templates:
+        return False
+    meaningful = [r for r in room_templates if isinstance(r, dict) and r.get('luci')]
+    if not meaningful:
+        return False
+    # ignore legacy placeholder room "manual" which grouped everything together
+    non_manual = [r for r in meaningful if (r.get('id') or '').lower() not in {'', 'manual', 'default'}]
+    return bool(non_manual)
+
+
+def fetch_ha_rooms(integration: dict):
+    """Return rooms using synced templates + current HA state."""
+    import requests
+    if not integration:
+        raise Exception("integration not configured")
+    host = integration.get('host')
+    token = integration.get('token')
+    if not host or not token:
+        raise Exception("integration missing host or token")
+
+    cfg = read_config()
+    synced = cfg.get('synced') or {}
+    tracked_entities: List[str] = [e for e in (synced.get('tracked_entities') or []) if isinstance(e, str)]
+    room_templates = cfg.get('rooms') or []
+    background_map = {}
+    for template in room_templates:
+        if not isinstance(template, dict):
+            continue
+        room_id = template.get('id')
+        if room_id:
+            background_map[room_id] = template.get('background', '')
+
+    headers = {'Authorization': f"Bearer {token}", 'Accept': 'application/json'}
+    states_url = host.rstrip('/') + '/api/states'
+
+    # fetch all states (will be filtered down using tracked_entities)
+    try:
+        sresp = requests.get(states_url, headers=headers, timeout=10)
+        sresp.raise_for_status()
+        states = sresp.json()
+    except Exception as e:
+        raise Exception(f"failed to fetch states: {e}")
+
+    state_map = {it.get('entity_id'): it for it in states if it.get('entity_id')}
+
+    try:
+        registry = load_registry_snapshot(integration)
+    except Exception:
+        registry = {'areas': {}, 'devices': {}, 'entities': {}}
+    entity_registry = registry.get('entities') or {}
+    device_map = registry.get('devices') or {}
+    scenes_by_room, fallback_scenes = _gather_light_scenes(state_map, entity_registry, device_map)
+
+    # if no synced template is available yet, fall back to legacy discovery logic
+    if not tracked_entities or not _has_valid_room_templates(room_templates):
+        return _legacy_room_fetch(state_map, integration, background_map)
+
+    rooms = []
+    for template in room_templates:
+        room_id = template.get('id') or 'room'
+        devices = []
+        for light in template.get('luci') or []:
+            entity_id = light.get('entity_id')
+            if not entity_id or entity_id not in tracked_entities:
+                continue
+            st = state_map.get(entity_id)
+            attrs = (st or {}).get('attributes') or {}
+            registry_entry = entity_registry.get(entity_id) or {}
+            labels = _collect_labels(light.get('labels'), attrs.get('labels'), attrs.get('tags'), registry_entry.get('labels'))
+            if _should_hide_entity(attrs, registry_entry, labels):
+                continue
+            device_entry = {
+                'id': entity_id,
+                'type': 'light',
+                'name': light.get('name') or attrs.get('friendly_name') or entity_id,
+                'state': (st or {}).get('state', light.get('state')),
+                'brightness': attrs.get('brightness', light.get('brightness', 0))
+            }
+            # preserve HA capability metadata so the frontend can expose the right controls
+            capability_attrs = {
+                'brightness': attrs.get('brightness', light.get('brightness')),
+                'rgb_color': attrs.get('rgb_color'),
+                'hs_color': attrs.get('hs_color'),
+                'xy_color': attrs.get('xy_color'),
+                'color_temp': attrs.get('color_temp'),
+                'color_mode': attrs.get('color_mode') or light.get('color_mode'),
+                'supported_color_modes': attrs.get('supported_color_modes') or light.get('supported_color_modes'),
+                'supported_features': attrs.get('supported_features') or light.get('supported_features'),
+                'min_mireds': attrs.get('min_mireds') or light.get('min_mireds'),
+                'max_mireds': attrs.get('max_mireds') or light.get('max_mireds')
+            }
+            device_entry.update({
+                'rgb_color': capability_attrs['rgb_color'],
+                'color_temp': capability_attrs['color_temp'],
+                'color_mode': capability_attrs['color_mode'],
+                'attributes': capability_attrs,
+                'labels': labels
+            })
+            devices.append(device_entry)
+
+        room_scenes = list(scenes_by_room.get(room_id) or [])
+        if fallback_scenes:
+            room_scenes.extend(fallback_scenes)
+
+        rooms.append({
+            'id': room_id,
+            'name': template.get('name') or room_id,
+            'background': template.get('background', ''),
+            'devices': devices,
+            'scenes': room_scenes
+        })
+
+    return rooms
+
+
+def _legacy_room_fetch(state_map: dict, integration: dict, backgrounds: dict | None = None) -> list:
+    """Fallback to previous discovery behaviour when no synced config exists."""
+    try:
+        registry = load_registry_snapshot(integration)
+    except Exception:
+        registry = {'areas': {}, 'devices': {}, 'entities': {}, 'table': []}
+
+    area_map = registry.get('areas') or {}
+    device_map = registry.get('devices') or {}
+    entity_registry = registry.get('entities') or {}
+
+    rooms = {}
+    backgrounds = backgrounds or {}
+    for entity_id, ent in state_map.items():
+        if not entity_id:
+            continue
+        domain = entity_id.split('.', 1)[0] if '.' in entity_id else None
+        if domain != 'light':
+            continue
+        attrs = ent.get('attributes', {}) or {}
+        entity_meta = entity_registry.get(entity_id) or {}
+        labels = _collect_labels(attrs.get('labels'), entity_meta.get('labels'))
+        if _should_hide_entity(attrs, entity_meta, labels):
+            continue
+        dev_id = entity_meta.get('device_id') or attrs.get('device_id') or ent.get('context', {}).get('device_id')
+        area_id = entity_meta.get('area_id') or attrs.get('area_id') or attrs.get('room')
+        if not area_id and dev_id:
+            area_id = (device_map.get(dev_id) or {}).get('area_id')
+
+        room_key = area_id or 'ungrouped'
+        room_name = area_map.get(area_id) if area_id else 'Ungrouped'
+        device_name = attrs.get('friendly_name') or (device_map.get(dev_id) or {}).get('name') or entity_id
+        device_attrs = {
+            'brightness': attrs.get('brightness', 0),
+            'rgb_color': attrs.get('rgb_color'),
+            'hs_color': attrs.get('hs_color'),
+            'color_temp': attrs.get('color_temp'),
+            'color_mode': attrs.get('color_mode'),
+            'supported_color_modes': attrs.get('supported_color_modes'),
+        }
+
+        device = {
+            'id': entity_id,
+            'type': 'light',
+            'name': device_name,
+            'state': ent.get('state'),
+            'brightness': attrs.get('brightness', 0),
+            'rgb_color': attrs.get('rgb_color'),
+            'color_temp': attrs.get('color_temp'),
+            'color_mode': attrs.get('color_mode'),
+            'attributes': device_attrs,
+            'labels': labels
+        }
+        if room_key not in rooms:
+            rooms[room_key] = {
+                'id': room_key,
+                'name': room_name or 'Default',
+                'background': backgrounds.get(room_key, ''),
+                'devices': []
+            }
+        # allow stored background overrides even if room was already created
+        if room_key in backgrounds:
+            rooms[room_key]['background'] = backgrounds.get(room_key, '')
+        rooms[room_key]['devices'].append(device)
+
+    room_list = list(rooms.values())
+    scenes_by_room, fallback_scenes = _gather_light_scenes(state_map, entity_registry, device_map)
+    for room in room_list:
+        room_id = room.get('id')
+        scene_list = list(scenes_by_room.get(room_id) or [])
+        if fallback_scenes:
+            scene_list.extend(fallback_scenes)
+        room['scenes'] = scene_list
+    return room_list
+
+
+def refresh_room_snapshot(integration: dict, existing_rooms: list | None = None) -> dict:
+    """Build a synced snapshot of HA rooms and tracked entities."""
+    import requests
+    if not integration:
+        raise Exception("integration not configured")
+    host = integration.get('host')
+    token = integration.get('token')
+    if not host or not token:
+        raise Exception("integration missing host or token")
+
+    headers = {'Authorization': f"Bearer {token}", 'Accept': 'application/json'}
+    states_url = host.rstrip('/') + '/api/states'
+
+    try:
+        registry = load_registry_snapshot(integration)
+    except Exception:
+        registry = {'areas': {}, 'devices': {}, 'entities': {}}
+
+    try:
+        sresp = requests.get(states_url, headers=headers, timeout=10)
+        sresp.raise_for_status()
+        states = sresp.json() or []
+    except Exception as e:
+        raise Exception(f"failed to fetch states: {e}")
+
+    extra_entities = _normalize_entity_list((integration or {}).get('extra_entities'))
+    area_map = registry.get('areas') or {}
+    entity_registry = registry.get('entities') or {}
+    device_map = registry.get('devices') or {}
+    registry_table = registry.get('table') or []
+    table_lookup = {}
+    for row in registry_table:
+        ent_id = row.get('entity_id')
+        if ent_id and ent_id not in table_lookup:
+            table_lookup[ent_id] = row
+    existing_rooms = existing_rooms or []
+    existing_backgrounds = {r.get('id'): r.get('background', '') for r in existing_rooms}
+    existing_names = {r.get('id'): r.get('name') for r in existing_rooms if r.get('id')}
+    entity_room_map = {}
+    for room in existing_rooms:
+        room_id = room.get('id')
+        if not room_id:
+            continue
+        for light in room.get('luci') or []:
+            entity_id = light.get('entity_id')
+            if entity_id:
+                entity_room_map[entity_id] = room_id
+
+    rooms_map = {}
+    tracked = []
+    for ent in states:
+        entity_id = ent.get('entity_id')
+        if not entity_id:
+            continue
+        domain = entity_id.split('.', 1)[0] if '.' in entity_id else None
+        if domain != 'light':
+            continue
+        attrs = ent.get('attributes', {}) or {}
+        meta = entity_registry.get(entity_id) or {}
+        labels = _collect_labels(attrs.get('labels'), meta.get('labels'))
+        if _should_hide_entity(attrs, meta, labels):
+            continue
+        dev_id = meta.get('device_id') or attrs.get('device_id')
+        dev = device_map.get(dev_id) if dev_id else None
+        table_entry = table_lookup.get(entity_id) or {}
+        area_id = (
+            meta.get('area_id')
+            or (dev or {}).get('area_id')
+            or attrs.get('area_id')
+            or table_entry.get('area_id')
+        )
+        if not area_id:
+            area_id = entity_room_map.get(entity_id)
+        if not area_id and entity_id not in extra_entities:
+            area_id = 'manual'
+        room_key = area_id or 'manual'
+        area_label = area_map.get(area_id) if area_id and area_id != 'manual' else None
+        if not area_label and table_entry.get('area_name'):
+            area_label = table_entry.get('area_name')
+        room_name = existing_names.get(room_key) or area_label
+        if not room_name:
+            room_name = 'Manual' if room_key == 'manual' else (room_key or 'Manual')
+
+        if room_key not in rooms_map:
+            rooms_map[room_key] = {
+                'id': room_key,
+                'name': room_name or room_key or 'Manual',
+                'background': existing_backgrounds.get(room_key, ''),
+                'luci': [],
+                'media': []
+            }
+
+        rooms_map[room_key]['luci'].append({
+            'entity_id': entity_id,
+            'name': attrs.get('friendly_name') or (dev or {}).get('name') or entity_id,
+            'state': ent.get('state'),
+            'brightness': attrs.get('brightness'),
+            'rgb_color': attrs.get('rgb_color'),
+            'hs_color': attrs.get('hs_color'),
+            'color_temp': attrs.get('color_temp'),
+            'color_mode': attrs.get('color_mode'),
+            'supported_color_modes': attrs.get('supported_color_modes'),
+            'device_id': dev_id,
+            'area_id': area_id,
+            'updated_at': ent.get('last_changed') or ent.get('last_updated'),
+            'labels': labels
+        })
+        tracked.append(entity_id)
+
+    synced_at = datetime.utcnow().isoformat()
+    return {
+        'rooms': list(rooms_map.values()),
+        'tracked_entities': sorted(set(tracked)),
+        'synced_at': synced_at,
+        'extra_entities': extra_entities
+    }
+
+
+def _normalize_entity_list(raw) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        tokens = raw.replace('\n', ',').split(',')
+    elif isinstance(raw, list):
+        tokens = raw
+    else:
+        tokens = []
+    cleaned = []
+    for item in tokens:
+        if not isinstance(item, str):
+            continue
+        val = item.strip()
+        if val:
+            cleaned.append(val)
+    return sorted(set(cleaned))

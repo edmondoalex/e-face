@@ -1,0 +1,59 @@
+:root{
+  --bg:#0f1221;
+  --surface:#141625;
+  --muted:#9aa0b4;
+  --text:#e6eef8;
+  --primary:#6c8cff;
+  --accent:#22c1c3;
+  --radius:12px;
+  --card-padding:16px;
+}
+*{box-sizing:border-box}
+html,body,#app{min-height:100%;width:100%;}
+body{
+  margin:0; font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  background: linear-gradient(180deg,var(--bg), #0b0d14);
+  color:var(--text);
+}
+.app-wrapper{width:100%; min-height:100vh; display:flex; align-items:stretch;}
+.app-shell{width:100%; min-height:100vh; margin:0; padding:clamp(18px,2vw,36px); display:flex; flex-direction:column; gap:18px; flex:1;}
+header.app-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,var(--primary),var(--accent));display:flex;align-items:center;justify-content:center;font-weight:700}
+.nav{display:flex;gap:8px}
+.btn{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:8px 12px;border-radius:8px;cursor:pointer}
+.btn.primary{background:linear-gradient(90deg,var(--primary),var(--accent));border:none;color:#071026}
+.card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:var(--card-padding);border-radius:var(--radius);box-shadow:0 6px 18px rgba(2,6,23,0.6);}
+.surface-panel{max-width:1200px;margin:0 auto;width:100%;}
+.main-area{flex:1;width:100%;display:flex;flex-direction:column;gap:20px;}
+.main-area > :first-child{width:100%;}
+.lights-grid{display:flex;gap:12px;flex-wrap:wrap}
+.light-card{width:240px;padding:12px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));}
+label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}
+input[type="range"]{width:100%}
+input,textarea{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:8px;border-radius:8px}
+footer{margin-top:24px;color:var(--muted);font-size:12px;text-align:center}
+
+/* Device tile visuals and room background handling */
+.device-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:12px }
+.device-tile { border-radius:12px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:12px; box-shadow:0 6px 18px rgba(2,6,23,0.6); }
+.device-tile .device-icon { width:56px;height:56px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.02);font-size:22px }
+.device-tile .device-icon.on { box-shadow:0 0 18px 6px rgba(108,140,255,0.08); background: linear-gradient(135deg,var(--primary),var(--accent)); color:#041229 }
+.device-name{font-weight:700}
+
+/* Per-room background applied to documentElement; provide overlay for contrast */
+:root.room-bg-active { --bg-overlay: linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.55)); }
+body.room-bg { background-size: cover; background-position: center center; }
+body.room-bg::before { content: ''; position: fixed; inset:0; pointer-events:none; background:var(--bg-overlay, rgba(0,0,0,0.45)); }
+
+.muted { color: var(--muted) }
+
+/* small responsive tweaks */
+@media (max-width:900px){
+  .app-shell{padding:16px 12px 24px;}
+}
+
+@media (max-width:600px){
+  .device-grid{ grid-template-columns: repeat(2,1fr) }
+  .app-shell{padding:12px 10px 20px;}
+}

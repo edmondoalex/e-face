@@ -1,0 +1,10 @@
+services:
+  e-face:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - EFACE_API_TOKEN=devtoken123
+    volumes:
+      - ./backend:/app/backend
+    restart: unless-stopped
