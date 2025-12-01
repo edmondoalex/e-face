@@ -6,7 +6,8 @@
       "remote_host": "http://manager.ekonex.it:42000",
       "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI2NzkxZjNmOGYwODg0MjJkYjQwNWRmYmQ5NmViMzc1MSIsImlhdCI6MTc2MzYyNTEzOSwiZXhwIjoyMDc4OTg1MTM5fQ.JjSJLWJj13BLuFCdSRZ_-qrDVfj2r3BJbHZiHgljR18",
       "enabled": true,
-      "extra_entities": []
+      "extra_entities": [],
+      "path": "/api"
     },
     "theme": {
       "primary": "#0036fa",
@@ -25,7 +26,9 @@
     "mode": "jwt",
     "issuer": "https://portal.example.com",
     "audience": "eface-addon",
-    "algorithms": ["HS256"],
+    "algorithms": [
+      "HS256"
+    ],
     "public_key": "supersecret-shared",
     "login_url": "https://portal.example.com/sso?redirect_uri={redirect_uri}",
     "provider": "Portal SSO",
@@ -47,48 +50,41 @@
     {
       "id": "camera_luca",
       "name": "Camera Luca",
-      "background": "/assets/3280347-BK8Azk_i.jpg",
+      "background": "/assets/sfondo-stanza-1-kr4J9fWV.jpg",
       "luci": [
         {
           "entity_id": "light.lampadario_camera",
           "name": "Lampadario Camera",
-          "state": "on",
+          "state": "off",
           "brightness": null,
           "rgb_color": null,
           "hs_color": null,
           "color_temp": null,
-          "color_mode": "onoff",
+          "color_mode": null,
           "supported_color_modes": [
             "onoff"
           ],
           "device_id": "c6294dd4647c97a4c40138c23dc7058e",
           "area_id": "camera_luca",
-          "updated_at": "2025-11-26T13:47:27.394691+00:00",
+          "updated_at": "2025-11-27T12:18:00.713157+00:00",
           "labels": []
         },
         {
           "entity_id": "light.applique_camera",
           "name": "Applique Camera",
-          "state": "on",
-          "brightness": 75,
-          "rgb_color": [
-            255,
-            161,
-            75
-          ],
-          "hs_color": [
-            28.743,
-            70.706
-          ],
-          "color_temp": 392,
-          "color_mode": "color_temp",
+          "state": "off",
+          "brightness": null,
+          "rgb_color": null,
+          "hs_color": null,
+          "color_temp": null,
+          "color_mode": null,
           "supported_color_modes": [
             "color_temp",
             "xy"
           ],
           "device_id": "8e7e81e3e2144eac1c134a6f50a2685a",
           "area_id": "camera_luca",
-          "updated_at": "2025-11-26T13:47:26.115977+00:00",
+          "updated_at": "2025-11-27T14:54:01.660821+00:00",
           "labels": []
         }
       ],
@@ -97,7 +93,7 @@
     {
       "id": "sala_cucina",
       "name": "Sala/Cucina",
-      "background": "/assets/sfondo-gradiente-astratto-con-texture-grana-accattivante-aerografo-rumore-carta-da-parati-minimalista-DVYUFZoh.jpg",
+      "background": "/assets/sfondo-salotto-2-BKj53cqA.jpg",
       "luci": [
         {
           "entity_id": "light.applique_ingresso",
@@ -113,24 +109,7 @@
           ],
           "device_id": "a8a4e8795c8abb0859de5e98e18418e8",
           "area_id": "sala_cucina",
-          "updated_at": "2025-11-26T12:26:01.390065+00:00",
-          "labels": []
-        },
-        {
-          "entity_id": "light.applique_sala",
-          "name": "Applique Sala",
-          "state": "off",
-          "brightness": null,
-          "rgb_color": null,
-          "hs_color": null,
-          "color_temp": null,
-          "color_mode": null,
-          "supported_color_modes": [
-            "onoff"
-          ],
-          "device_id": "a2f2964160dcf5555daffef022d80d45",
-          "area_id": "sala_cucina",
-          "updated_at": "2025-11-26T13:45:54.336776+00:00",
+          "updated_at": "2025-11-27T12:47:21.321520+00:00",
           "labels": []
         },
         {
@@ -147,43 +126,7 @@
           ],
           "device_id": "b61ac3723108f2dcbab63db1c642c002",
           "area_id": "sala_cucina",
-          "updated_at": "2025-11-26T13:45:43.262534+00:00",
-          "labels": []
-        },
-        {
-          "entity_id": "light.lampada_3",
-          "name": "Applique Sala",
-          "state": "off",
-          "brightness": null,
-          "rgb_color": null,
-          "hs_color": null,
-          "color_temp": null,
-          "color_mode": null,
-          "supported_color_modes": [
-            "color_temp",
-            "xy"
-          ],
-          "device_id": "56c4b238c18cdeda3f76698ca80d0f19",
-          "area_id": "sala_cucina",
-          "updated_at": "2025-11-26T13:45:42.405192+00:00",
-          "labels": []
-        },
-        {
-          "entity_id": "light.sala_cucina",
-          "name": "Sala cucina",
-          "state": "off",
-          "brightness": null,
-          "rgb_color": null,
-          "hs_color": null,
-          "color_temp": null,
-          "color_mode": null,
-          "supported_color_modes": [
-            "color_temp",
-            "xy"
-          ],
-          "device_id": "1940cfa271bb0d7e97077e8a59fcedf2",
-          "area_id": "sala_cucina",
-          "updated_at": "2025-11-26T13:45:43.414650+00:00",
+          "updated_at": "2025-11-27T10:01:26.368837+00:00",
           "labels": []
         }
       ],
@@ -192,7 +135,7 @@
     {
       "id": "studio",
       "name": "Studio",
-      "background": "data:image/svg+xml,%3csvg%20width='1920'%20height='1080'%20viewBox='0%200%201920%201080'%20xmlns='http://www.w3.org/2000/svg'%20role='img'%20aria-label='Aurora%20gradient%20background'%3e%3cdefs%3e%3clinearGradient%20id='aurora'%20x1='0%25'%20y1='0%25'%20x2='100%25'%20y2='100%25'%3e%3cstop%20offset='0%25'%20stop-color='%230f172a'%20/%3e%3cstop%20offset='35%25'%20stop-color='%234c1d95'%20/%3e%3cstop%20offset='65%25'%20stop-color='%230ea5e9'%20/%3e%3cstop%20offset='100%25'%20stop-color='%2314f195'%20/%3e%3c/linearGradient%3e%3cradialGradient%20id='shine'%20cx='50%25'%20cy='30%25'%20r='60%25'%3e%3cstop%20offset='0%25'%20stop-color='%23ffffff22'%20/%3e%3cstop%20offset='100%25'%20stop-color='%23ffffff00'%20/%3e%3c/radialGradient%3e%3c/defs%3e%3crect%20width='1920'%20height='1080'%20fill='url(%23aurora)'%20/%3e%3ccircle%20cx='420'%20cy='280'%20r='260'%20fill='url(%23shine)'%20/%3e%3ccircle%20cx='1380'%20cy='760'%20r='320'%20fill='url(%23shine)'%20/%3e%3c/svg%3e",
+      "background": "/assets/sfondo-stanza-2-CDf53wet.jpeg",
       "luci": [
         {
           "entity_id": "light.applique_studio",
@@ -208,7 +151,7 @@
           ],
           "device_id": "f514c1441ae02cfb01dd0c3f32f68eac",
           "area_id": "studio",
-          "updated_at": "2025-11-23T03:50:30.634745+00:00",
+          "updated_at": "2025-11-27T10:01:16.226470+00:00",
           "labels": []
         },
         {
@@ -225,7 +168,7 @@
           ],
           "device_id": "3c7fcfc406b9a246c0ae7f7a92235ae7",
           "area_id": "studio",
-          "updated_at": "2025-11-23T03:50:30.633979+00:00",
+          "updated_at": "2025-11-27T10:01:16.230308+00:00",
           "labels": []
         }
       ],
@@ -250,7 +193,7 @@
           ],
           "device_id": "a166b38bac36384ec2119e519b6d6201",
           "area_id": "balcone",
-          "updated_at": "2025-11-26T13:43:05.765842+00:00",
+          "updated_at": "2025-11-27T10:01:26.051116+00:00",
           "labels": []
         }
       ],
@@ -275,7 +218,7 @@
           ],
           "device_id": "44f300f34723514f877c2ccd37ef5b9c",
           "area_id": "corridoio",
-          "updated_at": "2025-11-26T12:06:28.386782+00:00",
+          "updated_at": "2025-11-27T10:01:26.548475+00:00",
           "labels": []
         }
       ],
@@ -284,7 +227,7 @@
     {
       "id": "bagno",
       "name": "Bagno",
-      "background": "/assets/sfondo-gradiente-astratto-con-texture-grana-accattivante-aerografo-rumore-carta-da-parati-minimalista-DVYUFZoh.jpg",
+      "background": "/assets/sfondo-bagno-1-DP4z5jG9.jpeg",
       "luci": [
         {
           "entity_id": "light.luce_bagno_1",
@@ -300,7 +243,7 @@
           ],
           "device_id": "4fe1d7637fa4ebd7edfa5b03f56d4878",
           "area_id": "bagno",
-          "updated_at": "2025-11-26T12:06:28.411328+00:00",
+          "updated_at": "2025-11-27T10:01:26.523418+00:00",
           "labels": []
         },
         {
@@ -317,7 +260,7 @@
           ],
           "device_id": "cc47ca16074bea5857909cb1b1becb34",
           "area_id": "bagno",
-          "updated_at": "2025-11-26T12:06:28.447937+00:00",
+          "updated_at": "2025-11-27T10:01:26.523981+00:00",
           "labels": []
         }
       ],
@@ -355,18 +298,25 @@
       "light.applique_camera",
       "light.applique_corridoio",
       "light.applique_ingresso",
-      "light.applique_sala",
       "light.applique_studio",
-      "light.lampada_3",
       "light.lampadario_camera",
       "light.lampadario_studio",
       "light.luce_bagno_1",
       "light.luce_bagno_2",
       "light.luci_balcone",
-      "light.sala_cucina",
       "light.strip_sopra_cucina"
     ],
-    "synced_at": "2025-11-26T13:47:36.054401",
+    "synced_at": "2025-11-27T15:15:01.475504",
     "extra_entities": []
+  },
+  "cloud_context": {
+    "user_id": "user-42",
+    "username": "giulia",
+    "instance_id": "ha-instance-1",
+    "last_login_at": "2025-11-27T15:37:51.151854+00:00",
+    "preferences": {
+      "theme": "dark"
+    },
+    "pending_username": "giulia"
   }
 }

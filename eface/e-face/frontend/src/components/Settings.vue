@@ -411,17 +411,22 @@ export default {
 <style scoped>
 .settings-grid { display: grid; gap: 24px; }
 .settings-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 0 4px; }
-.ghost-btn { border-radius: 14px; border: 1px solid rgba(255,255,255,0.18); background: transparent; color: var(--text); padding: 8px 14px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: background .2s, border .2s; }
-.ghost-btn:hover { background: rgba(255,255,255,0.08); }
-.settings-card { background: var(--surface); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
+.ghost-btn { border-radius: 14px; border: 1px solid rgba(255,255,255,0.18); background: transparent; color: var(--text); padding: 8px 14px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: background var(--transition-fast), border var(--transition-fast), box-shadow var(--transition-base), transform var(--transition-fast); }
+.ghost-btn:hover { background: rgba(255,255,255,0.08); transform: translateY(-2px); box-shadow: 0 12px 26px rgba(0,0,0,0.35); }
+.ghost-btn:active { transform: translateY(0) scale(0.97); }
+.ghost-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.settings-card { background: var(--surface); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); transition: transform var(--transition-base), box-shadow var(--transition-base); animation: float-in 520ms cubic-bezier(0.22,1,0.36,1); }
+.settings-card:hover { transform: translateY(-4px); box-shadow: 0 30px 70px rgba(0,0,0,0.35); }
 .card-header { margin-bottom: 16px; }
 .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
 .form-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
-.color-chip { width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: transparent; cursor: pointer; }
+.color-chip { width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: transparent; cursor: pointer; transition: border var(--transition-fast), background var(--transition-fast), transform var(--transition-fast); }
+.color-chip:hover { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.04); transform: translateY(-1px); }
 .background-library { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.background-option { border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 10px; display: flex; gap: 12px; align-items: center; background: rgba(255,255,255,0.02); cursor: pointer; transition: border .2s, background .2s; }
+.background-option { border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 10px; display: flex; gap: 12px; align-items: center; background: rgba(255,255,255,0.02); cursor: pointer; transition: border var(--transition-fast), background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-base); }
 .background-option.selected { border-color: var(--primary); background: rgba(108,140,255,0.12); }
+.background-option:hover { border-color: rgba(255,255,255,0.15); background: rgba(255,255,255,0.06); transform: translateY(-2px); box-shadow: 0 16px 34px rgba(0,0,0,0.35); }
 .background-thumb { width: 64px; height: 48px; border-radius: 10px; background-size: cover; background-position: center; border: 1px solid rgba(255,255,255,0.08); }
 .background-copy { display: flex; flex-direction: column; gap: 4px; text-align: left; }
 .background-preview { width: 100%; height: 150px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); background-size: cover; background-position: center; margin-bottom: 12px; }

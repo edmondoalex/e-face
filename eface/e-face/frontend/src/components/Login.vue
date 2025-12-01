@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="login-panel card">
     <h2>Access</h2>
     <div class="mb-3" v-if="cloud.enabled">
       <button class="btn btn-secondary w-100" :disabled="loadingCloud" @click="startCloudLogin">

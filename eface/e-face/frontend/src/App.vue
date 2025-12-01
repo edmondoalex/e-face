@@ -22,6 +22,7 @@
           :conn-mode="haConnectionMode"
           :ha-connected="haDirectConnected"
           :backend-connected="backendWsConnected"
+          :weather="weatherSnapshot"
           @open-settings="openSettings"
           @must_change="onMustChange"
           @refresh-room="loadRoom(currentRoom)"
@@ -148,6 +149,7 @@ export default {
     const roomDevices = ref([])
     const integrationError = ref(null)
     const isAdmin = ref(localStorage.getItem('eface_is_admin') === '1')
+    const weatherSnapshot = ref(null)
 
     function applyTheme(theme = {}) {
       if (typeof document === 'undefined') return
@@ -191,6 +193,7 @@ export default {
         const res = await api.get('/api/rooms')
         const previousRoom = currentRoom.value
         rooms.value = res.data.rooms || []
+        weatherSnapshot.value = res.data.weather || null
         rebuildEntityMetadata(rooms.value)
 
         if (!rooms.value.length) {
@@ -216,6 +219,7 @@ export default {
         const msg = e.response?.data?.detail || e.message || 'Unknown error'
         integrationError.value = msg
         rooms.value = []
+        weatherSnapshot.value = null
         rebuildEntityMetadata([])
       }
     }
@@ -788,7 +792,7 @@ export default {
 
     loadBranding()
 
-    return { title, currentView, onLogged, onMustChange, openSettings, openDashboard, rooms, currentRoom, roomDevices, loadRoom, onRoomChange, onRoomSelected, loadRooms, view, integrationError, isAdmin, haConnectionMode, haDirectConnected, backendWsConnected, Dashboard }
+    return { title, currentView, onLogged, onMustChange, openSettings, openDashboard, rooms, currentRoom, roomDevices, loadRoom, onRoomChange, onRoomSelected, loadRooms, view, integrationError, isAdmin, haConnectionMode, haDirectConnected, backendWsConnected, Dashboard, weatherSnapshot }
   }
 }
 </script>

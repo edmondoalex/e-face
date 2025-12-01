@@ -8,6 +8,7 @@ import jwt
 import logging
 from typing import List
 import time
+from urllib.parse import quote
 
 from .registry_cache import get_registry_snapshot, set_registry_snapshot
 
@@ -481,7 +482,95 @@ def _has_valid_room_templates(room_templates: list | None) -> bool:
     return bool(non_manual)
 
 
-def fetch_ha_rooms(integration: dict):
+def _coerce_str_list(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple, set)):
+        items: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item:
+                items.append(item)
+        return items
+    return []
+
+
+def _shape_weather_payload(entity_id: str, state: dict | None) -> dict | None:
+    if not entity_id or not state:
+        return None
+    attrs = (state.get('attributes') or {}) if isinstance(state, dict) else {}
+    return {
+        'entity_id': entity_id,
+        'id': entity_id,
+        'state': state.get('state'),
+        'attributes': attrs,
+        'last_changed': state.get('last_changed'),
+        'last_updated': state.get('last_updated')
+    }
+
+
+def _extract_weather_snapshot(state_map: dict, preferred_ids: list[str] | None = None) -> dict | None:
+    if not isinstance(state_map, dict):
+        return None
+    candidates = [c for c in (preferred_ids or []) if isinstance(c, str) and c]
+    for entity_id in candidates:
+        state = state_map.get(entity_id)
+        shaped = _shape_weather_payload(entity_id, state)
+        if shaped:
+            return shaped
+    for entity_id, state in state_map.items():
+        if isinstance(entity_id, str) and entity_id.lower().startswith('weather.'):
+            shaped = _shape_weather_payload(entity_id, state)
+            if shaped:
+                return shaped
+    return None
+
+
+def _fetch_weather_forecast(host: str, token: str, entity_id: str, forecast_type: str | None = None):
+    if not host or not token or not entity_id:
+        return None
+    import requests
+    base = host.rstrip('/')
+    entity_segment = quote(entity_id, safe='')
+    url = f"{base}/api/weather/forecast/{entity_segment}"
+    params = {}
+    if forecast_type:
+        params['type'] = forecast_type
+    headers = {'Authorization': f"Bearer {token}", 'Accept': 'application/json'}
+    try:
+        resp = requests.get(url, headers=headers, params=params or None, timeout=6)
+        resp.raise_for_status()
+        payload = resp.json()
+        if isinstance(payload, dict):
+            data = payload.get('forecast')
+            if isinstance(data, list):
+                return data
+        if isinstance(payload, list):
+            return payload
+    except Exception as exc:
+        logging.getLogger('e-face.core').debug('Weather forecast fetch failed (%s, %s): %s', entity_id, forecast_type, exc)
+    return None
+
+
+def _enrich_weather_forecast(snapshot: dict, host: str, token: str) -> dict:
+    if not snapshot or not isinstance(snapshot, dict):
+        return snapshot
+    entity_id = snapshot.get('entity_id') or snapshot.get('id')
+    attrs = snapshot.get('attributes') or {}
+    hourly = _fetch_weather_forecast(host, token, entity_id, 'hourly')
+    daily = _fetch_weather_forecast(host, token, entity_id, 'daily')
+    if hourly:
+        attrs['forecast_hourly'] = hourly
+    if daily:
+        attrs['forecast_daily'] = daily
+    if not attrs.get('forecast') and hourly:
+        attrs['forecast'] = hourly
+    snapshot['attributes'] = attrs
+    return snapshot
+
+
+def fetch_ha_rooms(integration: dict, include_meta: bool = False):
     """Return rooms using synced templates + current HA state."""
     import requests
     if not integration:
@@ -524,9 +613,26 @@ def fetch_ha_rooms(integration: dict):
     device_map = registry.get('devices') or {}
     scenes_by_room, fallback_scenes = _gather_light_scenes(state_map, entity_registry, device_map)
 
+    preferred_weather = []
+    adv = cfg.get('advanced') or {}
+    integration_pref = integration.get('weather_entity') or (adv.get('weather_entity') if isinstance(adv, dict) else None)
+    preferred_weather.extend(_coerce_str_list(integration_pref))
+    synced_pref = synced.get('weather_entity') if isinstance(synced, dict) else None
+    preferred_weather.extend([p for p in _coerce_str_list(synced_pref) if p not in preferred_weather])
+    extra_weather = [ent for ent in (synced.get('extra_entities') or []) if isinstance(ent, str) and ent.startswith('weather.')] if isinstance(synced, dict) else []
+    for ent in extra_weather:
+        if ent not in preferred_weather:
+            preferred_weather.append(ent)
+    weather_snapshot = _extract_weather_snapshot(state_map, preferred_weather)
+    if weather_snapshot:
+        weather_snapshot = _enrich_weather_forecast(weather_snapshot, host, token)
+
     # if no synced template is available yet, fall back to legacy discovery logic
     if not tracked_entities or not _has_valid_room_templates(room_templates):
-        return _legacy_room_fetch(state_map, integration, background_map)
+        rooms_only = _legacy_room_fetch(state_map, integration, background_map)
+        if include_meta:
+            return rooms_only, ({'weather': weather_snapshot} if weather_snapshot else {})
+        return rooms_only
 
     rooms = []
     for template in room_templates:
@@ -582,6 +688,9 @@ def fetch_ha_rooms(integration: dict):
             'devices': devices,
             'scenes': room_scenes
         })
+
+    if include_meta:
+        return rooms, ({'weather': weather_snapshot} if weather_snapshot else {})
 
     return rooms
 

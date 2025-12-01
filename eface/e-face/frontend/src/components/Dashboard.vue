@@ -2,9 +2,20 @@
   <div class="control4-shell">
     <header class="dashboard-header card compact-header">
       <div class="header-inline">
-        <div class="brand-logo tiny" aria-label="Logo">EF</div>
+        <div class="brand-logo tiny" aria-label="Logo">
+          <img :src="brandLogo" alt="Logo E-face" />
+        </div>
         <div class="status-inline">
-          <div class="weather-chip compact">
+          <div
+            class="weather-chip compact interactive"
+            role="button"
+            tabindex="0"
+            :title="`Meteo: ${weatherSnapshot.condition}`"
+            :aria-label="`Dettagli meteo: ${weatherSnapshot.condition}`"
+            @click="openWeatherDetails"
+            @keydown.enter.prevent="openWeatherDetails"
+            @keydown.space.prevent="openWeatherDetails"
+          >
             <span class="icon" aria-hidden="true" v-html="iconMarkup(weatherSnapshot.icon)"></span>
             <div class="weather-meta">
               <strong>{{ weatherSnapshot.temperature }}</strong>
@@ -41,6 +52,26 @@
         </button>
       </div>
     </header>
+
+    <section
+      v-if="weatherForecastPreview.length"
+      class="weather-forecast-preview card compact-forecast"
+      role="region"
+      aria-label="Anteprima previsioni meteo"
+    >
+      <div class="preview-head">
+        <p class="eyebrow">Previsioni</p>
+        <button class="ghost-btn tiny" type="button" @click="openWeatherDetails">Dettagli</button>
+      </div>
+      <div class="forecast-preview-scroll">
+        <article v-for="entry in weatherForecastPreview" :key="`preview-${entry.key}`" class="forecast-preview-chip">
+          <p class="tiny muted">{{ entry.label }}</p>
+          <span class="icon" aria-hidden="true" v-html="iconMarkup(entry.icon)"></span>
+          <strong>{{ entry.temperature }}</strong>
+          <small>{{ entry.condition }}</small>
+        </article>
+      </div>
+    </section>
 
     <section class="console" :class="{ 'console--compact': !isAdmin }">
       <aside class="nav rail card">
@@ -324,6 +355,86 @@
 
     <transition name="fade">
       <div
+        v-if="weatherDetailsOpen"
+        class="weather-overlay"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeWeatherDetails"
+      >
+        <div class="weather-panel card">
+          <header class="panel-head">
+            <div>
+              <p class="eyebrow">Meteo</p>
+              <h3>{{ weatherSnapshot.condition }}</h3>
+              <small class="muted">{{ weatherDetails.location || 'Stazione locale' }}</small>
+            </div>
+            <button class="ghost-btn icon-only" type="button" @click="closeWeatherDetails" aria-label="Chiudi dettagli meteo">
+              <span class="icon" aria-hidden="true" v-html="iconMarkup('close')"></span>
+            </button>
+          </header>
+
+          <div class="weather-current">
+            <div class="current-temp">
+              <span class="temp-display">{{ weatherSnapshot.temperature }}</span>
+              <span class="muted tiny" v-if="weatherDetails.feelsLike">
+                Percepita {{ weatherDetails.feelsLike }}
+              </span>
+            </div>
+            <div class="weather-metrics">
+              <div v-for="metric in weatherDetails.metrics" :key="metric.label" class="metric-chip">
+                <p class="tiny muted">{{ metric.label }}</p>
+                <strong>{{ metric.value }}</strong>
+                <small v-if="metric.meta" class="muted">{{ metric.meta }}</small>
+              </div>
+            </div>
+          </div>
+
+          <section class="forecast-section" v-if="weatherDetails.forecast.length">
+            <div class="section-head">
+              <p>Previsioni</p>
+              <span class="muted tiny">Prossime ore</span>
+            </div>
+            <div class="forecast-scroll">
+              <article v-for="entry in weatherDetails.forecast" :key="entry.key" class="forecast-chip">
+                <p class="tiny muted">{{ entry.label }}</p>
+                <span class="icon" aria-hidden="true" v-html="iconMarkup(entry.icon)"></span>
+                <strong>{{ entry.temperature }}</strong>
+                <small>{{ entry.condition }}</small>
+              </article>
+            </div>
+          </section>
+
+          <section class="forecast-section" v-if="weatherDetails.dailyForecast.length">
+            <div class="section-head">
+              <p>Prossimi giorni</p>
+              <span class="muted tiny">Panoramica giornaliera</span>
+            </div>
+            <div class="forecast-grid">
+              <article v-for="entry in weatherDetails.dailyForecast" :key="`daily-${entry.key}`" class="forecast-day">
+                <p class="tiny muted">{{ entry.label }}</p>
+                <span class="icon" aria-hidden="true" v-html="iconMarkup(entry.icon)"></span>
+                <div class="day-temps">
+                  <strong>{{ entry.high }}</strong>
+                  <small v-if="entry.low">{{ entry.low }}</small>
+                </div>
+                <small>{{ entry.condition }}</small>
+              </article>
+            </div>
+          </section>
+
+          <p v-if="!weatherDetails.forecast.length && !weatherDetails.dailyForecast.length" class="muted tiny no-forecast">
+            Nessuna previsione disponibile dal servizio HA configurato.
+          </p>
+
+          <p class="muted tiny updated-at" v-if="weatherDetails.updatedAt">
+            Aggiornato {{ weatherDetails.updatedAt }}
+          </p>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="fade">
+      <div
         v-if="devicePanel.open"
         class="device-overlay"
         role="dialog"
@@ -426,6 +537,7 @@ import {
   normalizeBrightness,
   isValidHexColor
 } from '../utils/lightControl'
+import brandLogoImg from '../assets/logos/e-face_nobg.png'
 
 const ICONS = {
   default: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-5H9v5H4a1 1 0 0 1-1-1Z"/></svg>',
@@ -486,11 +598,16 @@ export default {
     backendConnected: {
       type: Boolean,
       default: false
+    },
+    weather: {
+      type: Object,
+      default: null
     }
   },
   emits: ['open-settings', 'refresh-room', 'room-selected'],
   data() {
     return {
+      brandLogo: brandLogoImg,
       categories: [
         { id: 'lights', label: 'Illuminazione', icon: 'bulb' },
         { id: 'media', label: 'Media', icon: 'play' },
@@ -504,6 +621,7 @@ export default {
       lightsModalOpen: false,
       showAllLightsInModal: false,
       haWeather: null,
+      weatherDetailsOpen: false,
       sceneTriggering: null,
       devicePanel: {
         open: false,
@@ -675,6 +793,74 @@ export default {
       const resolved = this.normalizeHaWeather(source)
       return resolved || fallback
     },
+    weatherDetails() {
+      const source = this.haWeather || this.findWeatherDevice()
+      const base = {
+        location: source?.attributes?.friendly_name || source?.friendly_name || '',
+        feelsLike: null,
+        metrics: [],
+        forecast: [],
+        dailyForecast: [],
+        updatedAt: null
+      }
+      if (!source) {
+        return base
+      }
+      const attrs = source.attributes || source.a || {}
+      const feelsLike = this.formatTemperatureValue(
+        attrs.apparent_temperature ?? attrs.feels_like ?? attrs.apparentTemperature
+      )
+      const metrics = []
+      const humidityValue = this.formatPercentage(attrs.humidity ?? attrs.current_humidity)
+      if (humidityValue) {
+        metrics.push({ label: 'Umidità', value: humidityValue })
+      }
+      const pressureValue = this.formatWeatherMeasurement(attrs.pressure, attrs.pressure_unit || 'hPa')
+      if (pressureValue) {
+        metrics.push({ label: 'Pressione', value: pressureValue })
+      }
+      const windValue = this.formatWeatherMeasurement(
+        attrs.wind_speed ?? attrs.wind_speed_avg ?? attrs.windSpeed,
+        attrs.wind_speed_unit || attrs.speed_unit || 'km/h'
+      )
+      if (windValue) {
+        metrics.push({
+          label: 'Vento',
+          value: windValue,
+          meta: this.formatWindBearing(attrs.wind_bearing ?? attrs.windBearing)
+        })
+      }
+      const visibilityValue = this.formatWeatherMeasurement(
+        attrs.visibility,
+        attrs.visibility_unit || 'km'
+      )
+      if (visibilityValue) {
+        metrics.push({ label: 'Visibilità', value: visibilityValue })
+      }
+      const hourlySource = this.pickForecastArray(attrs, ['forecast_hourly', 'forecast', 'hourly_forecast'])
+      const dailySource = this.pickForecastArray(attrs, ['forecast_daily', 'daily_forecast', 'forecast_twice_daily'])
+      const fallbackSource = hourlySource.length ? hourlySource : dailySource
+      const forecast = this.normalizeForecastEntries(fallbackSource, 12)
+      const dailyForecast = dailySource.length
+        ? this.buildDailyForecast(dailySource)
+        : this.buildDailyForecast(fallbackSource)
+      return {
+        ...base,
+        location: base.location || attrs.attribution || attrs.location_name || '',
+        feelsLike,
+        metrics,
+        forecast,
+        dailyForecast,
+        updatedAt: this.formatWeatherTimestamp(
+          attrs.observation_time || attrs.datetime || source.last_changed || source.last_updated
+        )
+      }
+    },
+    weatherForecastPreview() {
+      const hourly = this.weatherDetails.forecast.slice(0, 4)
+      if (hourly.length) return hourly
+      return this.weatherDetails.dailyForecast.slice(0, 4)
+    },
     alarmSnapshot() {
       const device = [...this.devices, ...(this.currentRoomObj?.devices || [])].find((dev) => {
         const domain = (dev?.domain || dev?.type || '').toLowerCase()
@@ -752,6 +938,16 @@ export default {
       },
       deep: true,
       immediate: true
+    },
+    weather: {
+      handler(value) {
+        if (value) {
+          this.haWeather = value
+        } else if (!this.haWeather) {
+          this.haWeather = null
+        }
+      },
+      immediate: true
     }
   },
   mounted() {
@@ -788,6 +984,12 @@ export default {
       this.clearQueuedRoomRefresh()
       this.$emit('refresh-room')
       this.fetchHaWeather()
+    },
+    openWeatherDetails() {
+      this.weatherDetailsOpen = true
+    },
+    closeWeatherDetails() {
+      this.weatherDetailsOpen = false
     },
     focusRoom(roomId) {
       if (roomId === undefined || roomId === null) return
@@ -1386,7 +1588,12 @@ export default {
       }) || null
     },
     updateWeatherFromDevices() {
-      this.haWeather = this.findWeatherDevice()
+      const deviceWeather = this.findWeatherDevice()
+      if (deviceWeather) {
+        this.haWeather = deviceWeather
+      } else if (!this.haWeather && this.weather) {
+        this.haWeather = this.weather
+      }
     },
     async fetchHaWeather() {
       this.updateWeatherFromDevices()
@@ -1462,6 +1669,160 @@ export default {
     ensureHexFormat(color) {
       if (!color) return '#ffffff'
       return color.startsWith('#') ? color : `#${color}`
+    },
+    coerceNumber(value) {
+      if (typeof value === 'number' && Number.isFinite(value)) return value
+      if (typeof value === 'string' && value.trim() === '') return null
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed : null
+    },
+    formatTemperatureValue(value) {
+      const numeric = this.coerceNumber(value)
+      if (numeric === null) {
+        return typeof value === 'string' && value.trim() ? value.trim() : null
+      }
+      return `${Math.round(numeric)}°`
+    },
+    formatPercentage(value) {
+      const numeric = this.coerceNumber(value)
+      if (numeric === null) return null
+      return `${Math.round(numeric)}%`
+    },
+    formatWeatherMeasurement(value, unit = '') {
+      const numeric = this.coerceNumber(value)
+      if (numeric === null) return null
+      const rounded = Math.round(numeric * 10) / 10
+      const normalized = Number.isInteger(rounded) ? Math.round(rounded) : rounded
+      const suffix = unit && typeof unit === 'string' ? unit.trim() : ''
+      return `${normalized}${suffix ? ` ${suffix}` : ''}`
+    },
+    formatWindBearing(value) {
+      const numeric = this.coerceNumber(value)
+      if (numeric === null) return null
+      const normalized = ((numeric % 360) + 360) % 360
+      const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+      const idx = Math.round(normalized / 45) % dirs.length
+      return `${dirs[idx]} (${Math.round(normalized)}°)`
+    },
+    formatForecastLabel(value, fallbackIndex = 0) {
+      if (!value) {
+        const baseDate = new Date(Date.now() + fallbackIndex * 60 * 60 * 1000)
+        return new Intl.DateTimeFormat('it-IT', { weekday: 'short', hour: '2-digit' }).format(baseDate)
+      }
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return String(value)
+      const now = new Date()
+      const sameDay = date.toDateString() === now.toDateString()
+      const formatter = new Intl.DateTimeFormat('it-IT', sameDay ? { hour: '2-digit', minute: '2-digit' } : { weekday: 'short', hour: '2-digit' })
+      return formatter.format(date)
+    },
+    formatWeatherTimestamp(value) {
+      if (!value) return null
+      const date = value instanceof Date ? value : new Date(value)
+      if (Number.isNaN(date.getTime())) return null
+      return new Intl.DateTimeFormat('it-IT', { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(date)
+    },
+    pickForecastArray(attrs = {}, keys = []) {
+      if (!attrs || typeof attrs !== 'object') return []
+      for (const key of keys) {
+        if (!key) continue
+        const candidate = attrs[key]
+        if (Array.isArray(candidate) && candidate.length) {
+          return candidate
+        }
+      }
+      return []
+    },
+    normalizeForecastEntries(source = [], limit = 8) {
+      if (!Array.isArray(source) || !source.length) return []
+      return source.slice(0, limit).map((entry, index) => {
+        const conditionRaw = entry.condition || entry.summary || entry.precipitation || entry.icon || ''
+        const temperatureValue = entry.temperature
+          ?? entry.temphi
+          ?? entry.high_temperature
+          ?? entry.temperature_high
+          ?? entry.templow
+          ?? entry.low_temperature
+          ?? entry.temperature_low
+        const labelValue = entry.datetime || entry.time || entry.daytime || entry.dt || entry.timestamp
+        return {
+          key: labelValue || `slot-${index}`,
+          label: this.formatForecastLabel(labelValue, index),
+          temperature: this.formatTemperatureValue(temperatureValue) || '--°',
+          condition: this.formatCondition(conditionRaw) || '—',
+          icon: this.matchWeatherIcon(conditionRaw || entry.icon || '')
+        }
+      })
+    },
+    resolveForecastDate(value, fallbackIndex = 0) {
+      if (value) {
+        const dt = new Date(value)
+        if (!Number.isNaN(dt.getTime())) return dt
+      }
+      const fallback = new Date(Date.now() + fallbackIndex * 60 * 60 * 1000)
+      return fallback
+    },
+    formatDailyLabel(dateLike) {
+      if (!dateLike) return '—'
+      const date = dateLike instanceof Date ? dateLike : new Date(dateLike)
+      if (Number.isNaN(date.getTime())) return String(dateLike)
+      return new Intl.DateTimeFormat('it-IT', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(date)
+    },
+    buildDailyForecast(source = []) {
+      if (!Array.isArray(source) || !source.length) return []
+      const buckets = new Map()
+      source.forEach((entry, index) => {
+        const dt = this.resolveForecastDate(entry.datetime || entry.time || entry.daytime, index)
+        const key = dt.toISOString().slice(0, 10)
+        if (!buckets.has(key)) {
+          buckets.set(key, {
+            key,
+            date: dt,
+            high: null,
+            low: null,
+            samples: []
+          })
+        }
+        const bucket = buckets.get(key)
+        const highs = [entry.temperature, entry.temphi, entry.high_temperature]
+        const lows = [entry.templow, entry.low_temperature, entry.apparent_temperature_low]
+        highs.forEach((val) => {
+          const num = this.coerceNumber(val)
+          if (num === null) return
+          bucket.high = bucket.high === null ? num : Math.max(bucket.high, num)
+          bucket.low = bucket.low === null ? num : Math.min(bucket.low, num)
+        })
+        lows.forEach((val) => {
+          const num = this.coerceNumber(val)
+          if (num === null) return
+          bucket.low = bucket.low === null ? num : Math.min(bucket.low, num)
+        })
+        bucket.samples.push({
+          dt,
+          condition: entry.condition || entry.summary || '',
+          icon: entry.icon
+        })
+      })
+      return Array.from(buckets.values())
+        .sort((a, b) => (a.date?.getTime() || 0) - (b.date?.getTime() || 0))
+        .map((bucket) => {
+          const targetHour = 13
+          const preferredSample = bucket.samples.reduce((best, sample) => {
+            const hours = sample.dt instanceof Date ? sample.dt.getHours() : targetHour
+            const diff = Math.abs(hours - targetHour)
+            if (!best) return { sample, diff }
+            return diff < best.diff ? { sample, diff } : best
+          }, null)?.sample
+          return {
+            key: bucket.key,
+            label: this.formatDailyLabel(bucket.date),
+            high: bucket.high === null ? '--°' : this.formatTemperatureValue(bucket.high),
+            low: bucket.low === null ? null : this.formatTemperatureValue(bucket.low),
+            condition: this.formatCondition(preferredSample?.condition || '') || '—',
+            icon: this.matchWeatherIcon(preferredSample?.condition || preferredSample?.icon || '')
+          }
+        })
+        .slice(0, 5)
     },
     iconMarkup(key) {
       return ICONS[key] || ICONS.default
@@ -1642,6 +2003,8 @@ export default {
   justify-content: center;
   padding: 3px;
   margin-right: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  transition: box-shadow var(--transition-base), transform var(--transition-fast);
 }
 
 .connection-dot .dot {
@@ -1649,6 +2012,7 @@ export default {
   height: 8px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.6);
+  animation: pulse-glow 2.4s ease-in-out infinite;
 }
 
 .connection-dot.tone-local .dot {
@@ -1676,6 +2040,7 @@ export default {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: transform var(--transition-base), box-shadow var(--transition-base), border-color var(--transition-fast);
 }
 
 .connection-status-card .icon {
@@ -1722,23 +2087,43 @@ export default {
   opacity: 0.9;
 }
 
+.connection-status-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+}
+
+
 .brand-logo {
-  width: 56px;
-  height: 56px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #6c8cff, #22c1c3);
+  width: 78px;
+  height: 78px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  box-shadow: 0 15px 35px rgba(4, 7, 20, 0.45);
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+  padding: 8px;
+  overflow: hidden;
+}
+
+.brand-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.brand-logo:hover {
+  transform: translateY(-2px) rotate(-1.5deg);
+  box-shadow: 0 24px 38px rgba(4, 7, 20, 0.6);
 }
 
 .brand-logo.tiny {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  font-size: 14px;
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
 }
 
 .muted {
@@ -1775,6 +2160,7 @@ h3 {
   border: 1px solid rgba(255, 255, 255, 0.16);
   padding: 10px 14px;
   background: rgba(255, 255, 255, 0.07);
+  transition: transform var(--transition-fast), box-shadow var(--transition-base), border-color var(--transition-fast);
 }
 
 .weather-chip {
@@ -1785,6 +2171,21 @@ h3 {
   padding: 12px 18px;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(49, 85, 255, 0.18));
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.weather-chip.interactive {
+  cursor: pointer;
+}
+
+.weather-chip.interactive:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 2px;
+}
+
+.weather-chip:hover,
+.alarm-chip:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
 }
 
 .weather-chip .icon {
@@ -1819,6 +2220,113 @@ h3 {
   letter-spacing: 0.08em;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.78);
+}
+
+.weather-forecast-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: -8px;
+}
+
+.weather-forecast-preview.compact-forecast {
+  padding: clamp(12px, 1.1vw, 18px);
+}
+
+.weather-forecast-preview .preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.forecast-preview-scroll {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.forecast-preview-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.forecast-preview-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+}
+
+.forecast-preview-chip {
+  min-width: 110px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.28);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.forecast-preview-chip .icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 7, 20, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.forecast-preview-chip strong {
+  font-size: 18px;
+}
+
+.forecast-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.forecast-day {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.forecast-day .icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.day-temps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.day-temps strong {
+  font-size: 22px;
+}
+
+.day-temps small {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.no-forecast {
+  margin-top: 8px;
 }
 .weather-chip.compact {
   padding: 6px 10px;
@@ -1881,11 +2389,22 @@ h3 {
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  transition: background 0.2s, border 0.2s;
+  transition: background var(--transition-fast), border var(--transition-fast), box-shadow var(--transition-base), transform var(--transition-fast);
 }
 
 .ghost-btn:hover {
   background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(4, 7, 20, 0.4);
+}
+
+.ghost-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.ghost-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .icon-only {
@@ -1900,6 +2419,11 @@ h3 {
   width: 20px;
   height: 20px;
   color: inherit;
+  transition: transform var(--transition-fast);
+}
+
+.ghost-btn:hover .icon {
+  transform: scale(1.06);
 }
 
 .icon :deep(svg),
@@ -1957,13 +2481,20 @@ h3 {
   height: 50px;
   flex: 0 0 50px;
   cursor: pointer;
-  transition: border 0.2s, background 0.2s, transform 0.2s;
+  transition: border var(--transition-fast), background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-base);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.nav-btn:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .nav-btn.active {
   background: linear-gradient(120deg, var(--primary), var(--accent));
   color: #050714;
   border-color: transparent;
+  box-shadow: 0 16px 28px rgba(11, 16, 32, 0.55);
 }
 
 .nav-icon {
@@ -2042,7 +2573,8 @@ h3 {
   align-items: center;
   gap: 12px;
   cursor: pointer;
-  transition: border 0.2s, transform 0.2s;
+  transition: border var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-base), background var(--transition-fast);
+  box-shadow: 0 8px 22px rgba(4, 7, 18, 0.4);
 }
 
 .room-chip strong {
@@ -2050,10 +2582,17 @@ h3 {
   font-weight: 600;
 }
 
+.room-chip:hover {
+  border-color: rgba(108, 140, 255, 0.45);
+  transform: translateY(-2px);
+  box-shadow: 0 18px 32px rgba(4, 7, 18, 0.55);
+}
+
 .room-chip.active {
   border-color: transparent;
   background: linear-gradient(135deg, rgba(108, 140, 255, 0.18), rgba(34, 193, 195, 0.3));
   transform: translateY(-2px);
+  box-shadow: 0 24px 40px rgba(4, 7, 18, 0.65);
 }
 
 .chip-icon {
@@ -2138,6 +2677,7 @@ h3 {
   color: var(--text);
   cursor: pointer;
   font-size: 13px;
+  transition: background var(--transition-fast), border var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-base);
 }
 
 .pill.on {
@@ -2177,6 +2717,11 @@ h3 {
   cursor: wait;
 }
 
+.pill:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.3);
+}
+
 .lights-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -2192,15 +2737,31 @@ h3 {
   flex-direction: column;
   gap: 12px;
   cursor: pointer;
-  transition: border 0.2s, transform 0.2s, box-shadow 0.2s;
+  transition: border var(--transition-fast), transform var(--transition-base), box-shadow var(--transition-base), background var(--transition-fast);
   color: rgba(255, 255, 255, 0.95);
   width: auto;
   min-width: 0;
+  animation: float-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .light-card.active {
   border-color: rgba(138, 180, 255, 0.6);
-  box-shadow: 0 12px 25px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.4);
+  transform: translateY(-2px);
+}
+
+.light-card:hover {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.4);
+  border-color: rgba(138, 180, 255, 0.35);
+}
+
+.light-card:nth-child(2n) {
+  animation-delay: 60ms;
+}
+
+.light-card:nth-child(3n) {
+  animation-delay: 120ms;
 }
 
 .light-head {
@@ -2226,7 +2787,8 @@ h3 {
   justify-content: center;
   padding: 0;
   cursor: pointer;
-  transition: transform 0.15s ease, border 0.2s ease, background 0.2s ease;
+  transition: transform var(--transition-fast), border var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+  box-shadow: 0 8px 20px rgba(5, 7, 20, 0.45);
 }
 
 .device-icon-btn.sm {
@@ -2247,6 +2809,11 @@ h3 {
 
 .device-icon-btn:active {
   transform: scale(0.95);
+}
+
+.device-icon-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 16px 26px rgba(5, 7, 20, 0.55);
 }
 
 .device-icon {
@@ -2413,6 +2980,13 @@ h3 {
   padding: 12px 16px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform var(--transition-fast), box-shadow var(--transition-base), border-color var(--transition-fast);
+}
+
+.system-pill:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .system-pill.positive {
@@ -2433,6 +3007,11 @@ h3 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.telemetry-item:hover {
+  transform: translateX(4px);
 }
 
 .status-dot {
@@ -2445,6 +3024,7 @@ h3 {
 .status-dot.on {
   background: #66ffa6;
   box-shadow: 0 0 15px rgba(102, 255, 166, 0.5);
+  animation: pulse-glow 2.8s ease-in-out infinite;
 }
 
 .tag {
@@ -2453,6 +3033,7 @@ h3 {
   padding: 6px 14px;
   background: transparent;
   color: var(--text);
+  transition: border var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
 }
 
 .tag.compact {
@@ -2460,15 +3041,28 @@ h3 {
   font-size: 12px;
 }
 
+.tag:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
+}
+
 .support-card {
   border-radius: 18px;
   padding: 18px;
   background: rgba(5, 7, 18, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+  animation: float-in 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.support-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 38px rgba(0, 0, 0, 0.4);
 }
 
 .lights-overlay,
-.device-overlay {
+.device-overlay,
+.weather-overlay {
   position: fixed;
   inset: 0;
   background: rgba(3, 5, 15, 0.72);
@@ -2478,13 +3072,18 @@ h3 {
   padding: clamp(16px, 3vw, 32px);
   padding-bottom: calc(clamp(16px, 3vw, 32px) + 110px + env(safe-area-inset-bottom, 0px));
   z-index: 20;
+  backdrop-filter: blur(18px);
+  animation: overlay-fade 220ms ease-out;
 }
 
 .lights-panel,
-.device-panel {
+.device-panel,
+.weather-panel {
   width: min(480px, 100%);
   max-height: min(80vh, 760px);
   overflow-y: auto;
+  animation: overlay-rise 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: bottom right;
 }
 
 .panel-head {
@@ -2505,14 +3104,119 @@ h3 {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.35);
   padding: 12px 16px;
-  transition: border 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: border var(--transition-fast), box-shadow var(--transition-base), transform var(--transition-base);
   cursor: pointer;
+  animation: float-in 440ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .active-light-card:hover {
   transform: translateY(-2px);
   border-color: rgba(138, 180, 255, 0.45);
   box-shadow: 0 18px 32px rgba(0, 0, 0, 0.35);
+}
+
+.weather-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.weather-current {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.current-temp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.temp-display {
+  font-size: clamp(42px, 4vw, 72px);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.weather-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+}
+
+.metric-chip {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-chip strong {
+  font-size: 18px;
+  letter-spacing: 0.04em;
+}
+
+.forecast-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.forecast-scroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.forecast-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.forecast-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+}
+
+.forecast-chip {
+  min-width: 120px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  backdrop-filter: blur(8px);
+}
+
+.forecast-chip .icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.forecast-chip strong {
+  font-size: 20px;
+}
+
+.updated-at {
+  margin-top: 4px;
+  text-align: right;
+}
+
+.active-light-card:nth-child(2n) {
+  animation-delay: 60ms;
 }
 
 .active-light-body {
@@ -2570,10 +3274,16 @@ h3 {
   height: 36px;
   background: var(--swatch-color);
   cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
 
 .swatch.active {
   border-color: #ffffff;
+}
+
+.swatch:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 14px rgba(0, 0, 0, 0.35);
 }
 
 .hue-slider {
@@ -2653,6 +3363,15 @@ h3 {
 .no-controls {
   margin-top: 24px;
   text-align: center;
+}
+
+@keyframes overlay-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .fade-enter-active,

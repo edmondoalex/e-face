@@ -13,8 +13,11 @@ def list_rooms(token_payload=Depends(require_token)):
     if not integration or not integration.get('enabled'):
         raise HTTPException(status_code=503, detail="integration_missing")
     try:
-        rooms = fetch_ha_rooms(integration)
-        return {"rooms": rooms, "source": "ha"}
+        rooms, meta = fetch_ha_rooms(integration, include_meta=True)
+        response = {"rooms": rooms, "source": "ha"}
+        if isinstance(meta, dict):
+            response.update(meta)
+        return response
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"integration_failed:{str(e)}")
 
