@@ -260,17 +260,64 @@
               <span class="icon" aria-hidden="true" v-html="iconMarkup('close')"></span>
             </button>
           </header>
-          <div v-if="activeLightDevices.length" class="active-lights-list">
-            <div v-for="device in activeLightDevices" :key="device.id" class="active-light-row">
-              <span class="icon" aria-hidden="true" v-html="iconMarkup('bulb')"></span>
-              <div>
-                <strong>{{ device.name }}</strong>
-                <small>{{ device.roomName }}</small>
-              </div>
-              <button class="pill ghost" type="button" @click="toggle(device.ref)">Spegni</button>
+          <div class="panel-controls">
+            <div class="filter-toggle" role="group" aria-label="Filtro luci">
+              <button
+                class="pill"
+                type="button"
+                :class="{ on: !showAllLightsInModal }"
+                @click="setLightsModalFilter(false)"
+              >
+                Solo accese
+              </button>
+              <button
+                class="pill ghost"
+                type="button"
+                :class="{ on: showAllLightsInModal }"
+                @click="setLightsModalFilter(true)"
+              >
+                Tutte
+              </button>
             </div>
+            <button
+              class="pill danger tiny"
+              type="button"
+              :disabled="!canTurnOffVisibleLights"
+              @click="turnOffVisibleLights"
+            >
+              Spegni tutte
+            </button>
           </div>
-          <p v-else class="muted">Nessuna luce risulta accesa.</p>
+          <div v-if="modalLightDevices.length" class="active-lights-list">
+            <article
+              v-for="device in modalLightDevices"
+              :key="device.id"
+              class="active-light-card"
+              :style="lightCardStyle(device.ref)"
+              @click="tryOpenDevicePanel(device.ref, device.roomRef)"
+            >
+              <div class="active-light-body">
+                <button
+                  class="device-icon-btn sm"
+                  type="button"
+                  :aria-pressed="true"
+                  :style="deviceIconStyle(device.ref)"
+                  @click.stop="toggle(device.ref)"
+                >
+                  <span class="device-icon" aria-hidden="true" v-html="iconMarkup(deviceIcon(device.ref))"></span>
+                </button>
+                <div class="active-light-text">
+                  <p class="light-label">{{ device.name }}</p>
+                  <p class="muted tiny">{{ device.stateLabel }}</p>
+                  <small class="muted">{{ device.roomName }}</small>
+                </div>
+                <button class="pill ghost tiny" type="button" @click.stop="toggle(device.ref)">Spegni</button>
+              </div>
+            </article>
+          </div>
+          <p v-else class="muted">
+            {{ showAllLightsInModal ? 'Nessuna luce disponibile.' : 'Nessuna luce risulta accesa.' }}
+          </p>
         </div>
       </div>
     </transition>
@@ -455,6 +502,7 @@ export default {
       lastCommand: null,
       lastRefresh: Date.now(),
       lightsModalOpen: false,
+      showAllLightsInModal: false,
       haWeather: null,
       sceneTriggering: null,
       devicePanel: {
@@ -602,10 +650,23 @@ export default {
         { id: 'command', label: 'Ultimo comando', value: this.lastCommandLabel, accent: 'neutral' }
       ]
     },
-    activeLightDevices() {
-      return this.flattenedDevices()
-        .filter(({ device }) => this.isOn(device))
-        .map(({ device, room }) => ({ id: device.id, name: device.name, roomName: room.name, ref: device }))
+    allLightDevices() {
+      return this.flattenedDevices().map(({ device, room }) => ({
+        id: device.id,
+        name: device.name,
+        roomName: room.name,
+        roomRef: room,
+        ref: device,
+        stateLabel: this.deviceStateLabel(device),
+        isOn: this.isOn(device)
+      }))
+    },
+    modalLightDevices() {
+      const list = this.allLightDevices
+      return this.showAllLightsInModal ? list : list.filter((entry) => entry.isOn)
+    },
+    canTurnOffVisibleLights() {
+      return this.modalLightDevices.some((entry) => entry.isOn)
     },
     weatherSnapshot() {
       const fallback = { icon: 'sun', temperature: '--°', condition: 'In attesa dati HA' }
@@ -1027,6 +1088,14 @@ export default {
     },
     closeLightsModal() {
       this.lightsModalOpen = false
+    },
+    setLightsModalFilter(showAll) {
+      this.showAllLightsInModal = !!showAll
+    },
+    async turnOffVisibleLights() {
+      const targets = this.modalLightDevices.filter((entry) => entry.isOn)
+      if (!targets.length) return
+      await Promise.allSettled(targets.map((entry) => this.toggleDevice(entry.ref, false)))
     },
     tryOpenDevicePanel(device, room) {
       if (!device) return
@@ -2080,11 +2149,27 @@ h3 {
   background: transparent;
 }
 
+.pill.danger {
+  background: linear-gradient(135deg, rgba(255, 99, 132, 0.85), rgba(255, 138, 101, 0.8));
+  border-color: transparent;
+  color: #fff;
+}
+
 .pill.scene {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.12);
   font-size: 12px;
   padding-inline: 12px;
+}
+
+.pill.tiny {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .pill.scene:disabled {
@@ -2144,6 +2229,17 @@ h3 {
   transition: transform 0.15s ease, border 0.2s ease, background 0.2s ease;
 }
 
+.device-icon-btn.sm {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+
+.device-icon-btn.sm .device-icon {
+  width: 32px;
+  height: 32px;
+}
+
 .device-icon-btn:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
@@ -2169,6 +2265,18 @@ h3 {
   justify-content: space-between;
   min-height: 54px;
   flex: 1;
+}
+
+.light-text-block .light-label,
+.active-light-text .light-label {
+  color: rgba(255, 255, 255, 0.98);
+  font-weight: 600;
+}
+
+.light-text-block .muted,
+.active-light-text .muted,
+.active-light-text small {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .device-tags {
@@ -2388,17 +2496,39 @@ h3 {
 .active-lights-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   margin-top: 16px;
 }
 
-.active-light-row {
+.active-light-card {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 12px 16px;
+  transition: border 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+}
+
+.active-light-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(138, 180, 255, 0.45);
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.35);
+}
+
+.active-light-body {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  gap: 14px;
+}
+
+.active-light-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.active-light-text .light-label {
+  margin: 0;
+  font-weight: 600;
 }
 
 .device-overlay {
@@ -2660,6 +2790,21 @@ h3 {
     align-items: flex-end;
     justify-content: center;
   }
+}
+
+.panel-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.filter-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 @media (max-width: 520px) {

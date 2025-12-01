@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel
-from ..core import read_config, write_config, require_token
+
+from ..cloud import get_cloud_settings, sanitize_cloud_settings
+from ..core import read_config, require_token, write_config
 
 router = APIRouter()
 
@@ -28,3 +30,8 @@ def post_config(cfg: ConfigPayload, _=Depends(require_token)):
     data["advanced"] = cfg.advanced or {}
     write_config(data)
     return {"ok": True}
+
+
+@router.get("/cloud")
+def get_cloud_config():
+    return sanitize_cloud_settings(get_cloud_settings())

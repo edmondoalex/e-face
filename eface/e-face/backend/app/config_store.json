@@ -20,6 +20,29 @@
     "username": "admin",
     "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
   },
+  "cloud": {
+    "enabled": true,
+    "mode": "jwt",
+    "issuer": "https://portal.example.com",
+    "audience": "eface-addon",
+    "algorithms": ["HS256"],
+    "public_key": "supersecret-shared",
+    "login_url": "https://portal.example.com/sso?redirect_uri={redirect_uri}",
+    "provider": "Portal SSO",
+    "require_local_password": true
+  },
+  "cloud_instances": [
+    {
+      "instance_id": "ha-instance-1",
+      "name": "Casa Luca",
+      "integration": {
+        "host": "http://192.168.3.25:8123",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI2NzkxZjNmOGYwODg0MjJkYjQwNWRmYmQ5NmViMzc1MSIsImlhdCI6MTc2MzYyNTEzOSwiZXhwIjoyMDc4OTg1MTM5fQ.JjSJLWJj13BLuFCdSRZ_-qrDVfj2r3BJbHZiHgljR18",
+        "remote_host": "http://manager.ekonex.it:42000",
+        "path": "/api"
+      }
+    }
+  ],
   "rooms": [
     {
       "id": "camera_luca",
