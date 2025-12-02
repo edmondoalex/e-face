@@ -7,8 +7,8 @@ WORKDIR /app
 # Dipendenze sistema + Caddy reverse proxy
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends curl gnupg2 ca-certificates jq \
-	&& mkdir -p /etc/apt/keyrings \
-	&& curl -1sLf "https://dl.cloudsmith.io/public/caddy/stable/gpg.key" | gpg --dearmor -o /etc/apt/keyrings/caddy.gpg \
+	&& install -d -m 0755 /usr/share/keyrings \
+	&& curl -1sLf "https://dl.cloudsmith.io/public/caddy/stable/gpg.key" | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
 	&& curl -1sLf "https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt" | tee /etc/apt/sources.list.d/caddy-stable.list \
 	&& apt-get update \
 	&& apt-get install -y --no-install-recommends caddy \
