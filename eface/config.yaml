@@ -1,6 +1,6 @@
 name: "e-face"
 description: "Personalized user interface add-on (testing)"
-version: "b0.1.4"
+version: "b0.1.5"
 slug: "eface"
 init: false
 arch:
@@ -13,13 +13,6 @@ startup: application
 boot: auto
 ports:
   "8000/tcp": 8000
-  "443/tcp": null
 webui: "http://[HOST]:[PORT:8000]"
-options:
-  https_enabled: false
-  https_domain: ""
-  https_email: ""
-schema:
-  https_enabled: bool
-  https_domain: str?
-  https_email: str?
+options: {}
+schema: {}
