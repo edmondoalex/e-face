@@ -1,10 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
 from typing import List, Optional
-from ..core import read_config, require_token, fetch_ha_rooms
+from urllib.parse import quote
+
 import requests
+from requests.exceptions import ChunkedEncodingError
+from fastapi.responses import Response, StreamingResponse
+
+from ..core import read_config, require_token, fetch_ha_rooms
 
 router = APIRouter()
+
+
+def _require_token_flexible(authorization: str = Header(None), token: str | None = Query(None)):
+    if (not authorization or authorization.lower() == 'null') and token:
+        authorization = f"Bearer {token}"
+    return require_token(authorization)
 
 
 @router.get("")
@@ -157,3 +168,48 @@ def trigger_entity(entity_id: str, payload: TriggerPayload, token_payload=Depend
     if isinstance(payload.data, dict):
         data.update(payload.data)
     return _call_ha_service(domain, payload.service, data)
+
+
+def _camera_proxy_request(entity_id: str, endpoint: str, stream: bool = False):
+    integration = _require_integration()
+    host = integration.get('host')
+    token = integration.get('token')
+    encoded = quote(entity_id, safe='')
+    url = host.rstrip('/') + f"/api/{endpoint}/{encoded}"
+    try:
+        resp = requests.get(
+            url,
+            headers={'Authorization': f"Bearer {token}"},
+            stream=stream,
+            timeout=15
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"camera_proxy_failed:{exc}") from exc
+    return resp
+
+
+def _camera_stream_iterator(resp, chunk_size: int = 8192):
+    try:
+        for chunk in resp.iter_content(chunk_size=chunk_size):
+            if chunk:
+                yield chunk
+    except ChunkedEncodingError:
+        # Camera proxy closed the connection unexpectedly; treat as stream end.
+        return
+    finally:
+        resp.close()
+
+
+@router.get("/cameras/{entity_id:path}/stream")
+def camera_stream(entity_id: str, token_payload=Depends(_require_token_flexible)):
+    resp = _camera_proxy_request(entity_id, 'camera_proxy_stream', stream=True)
+    media_type = resp.headers.get('Content-Type') or 'multipart/x-mixed-replace; boundary=frame'
+    return StreamingResponse(_camera_stream_iterator(resp), media_type=media_type)
+
+
+@router.get("/cameras/{entity_id:path}/snapshot")
+def camera_snapshot(entity_id: str, token_payload=Depends(_require_token_flexible)):
+    resp = _camera_proxy_request(entity_id, 'camera_proxy', stream=False)
+    media_type = resp.headers.get('Content-Type') or 'image/jpeg'
+    return Response(content=resp.content, media_type=media_type)

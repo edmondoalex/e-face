@@ -15,6 +15,15 @@ from .core import BASE_DIR
 from .ha_ws import clients, start_background, stop_background
 
 
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):  # type: ignore[override]
+        response = await super().get_response(path, scope)
+        content_type = response.headers.get("content-type", "")
+        if response.status_code == 200 and "text/html" in content_type:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+
 app = FastAPI(title="e-face API")
 
 # include routers under /api
@@ -71,7 +80,7 @@ async def websocket_endpoint(websocket: "WebSocket"):
 if FRONTEND_DIST_PATH:
     app.mount(
         "/",
-        StaticFiles(directory=FRONTEND_DIST_PATH, html=True),
+        NoCacheStaticFiles(directory=FRONTEND_DIST_PATH, html=True),
         name="frontend",
     )
 

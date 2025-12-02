@@ -52,9 +52,7 @@
         </button>
       </div>
     </header>
-
     <section
-      v-if="weatherForecastPreview.length"
       class="weather-forecast-preview card compact-forecast"
       role="region"
       aria-label="Anteprima previsioni meteo"
@@ -213,6 +211,246 @@
               Apri impostazioni
             </button>
           </div>
+        </template>
+
+        <template v-else-if="activeCategory === 'security'">
+          <section class="card cameras-board" aria-label="Telecamere tvcc">
+            <header class="camera-board-head minimal">
+              <div class="camera-board-title">
+                <p class="eyebrow">Sicurezza</p>
+                <h3>Telecamere</h3>
+                <small class="muted tiny">Visione live, snapshot e stato segnale</small>
+              </div>
+              <div class="camera-metrics">
+                <div class="camera-metric" aria-label="Totale telecamere">
+                  <p class="tiny muted">Totali</p>
+                  <strong>{{ totalCameraCount }}</strong>
+                </div>
+                <div class="camera-metric" v-if="assignedCameraRooms.length" aria-label="Stanze con tvcc">
+                  <p class="tiny muted">Stanze</p>
+                  <strong>{{ assignedCameraRooms.length }}</strong>
+                </div>
+              </div>
+              <div class="camera-toolbar">
+                <button class="ghost-btn compact" type="button" @click="refreshAllCameraFeeds">
+                  <span class="icon" aria-hidden="true" v-html="iconMarkup('refresh')"></span>
+                  <span>Aggiorna live</span>
+                </button>
+              </div>
+            </header>
+
+            <div v-if="hasCameraInventory" class="camera-groups" aria-live="polite">
+              <section v-if="globalCameraList.length" class="camera-group">
+                <div class="section-head compact">
+                  <div>
+                    <p>Telecamere globali</p>
+                    <span class="muted tiny">Sempre disponibili</span>
+                  </div>
+                </div>
+                <div class="camera-mosaic">
+                  <article
+                    v-for="camera in globalCameraList"
+                    :key="cameraKey(camera)"
+                    :class="[
+                      'camera-card',
+                      'camera-card--mosaic',
+                      cameraFrameState(camera)
+                    ]"
+                  >
+                    <div
+                      class="camera-media"
+                      :class="cameraFrameState(camera)"
+                      role="button"
+                      tabindex="0"
+                      :aria-label="`Apri ${camera.name}`"
+                      @click="handleCameraPrimaryClick(camera)"
+                      @keydown.enter.prevent="handleCameraPrimaryClick(camera)"
+                      @keydown.space.prevent="handleCameraPrimaryClick(camera)"
+                    >
+                      <span class="camera-state-chip" :class="cameraStateChip(camera).tone">
+                        {{ cameraStateChip(camera).label }}
+                      </span>
+                      <img
+                        v-if="!cameraHasError(camera)"
+                        :src="cameraStreamSrc(camera)"
+                        :alt="`Diretta ${camera.name}`"
+                        loading="lazy"
+                        @error="handleCameraError(camera, $event)"
+                        @load="handleCameraFrameLoaded(camera)"
+                        draggable="false"
+                      />
+                      <img
+                        v-else-if="cameraHasFallback(camera)"
+                        :src="cameraFallbackEntry(camera)?.url"
+                        :alt="`Istantanea ${camera.name}`"
+                        loading="lazy"
+                        draggable="false"
+                        @error="refreshCameraFallback(camera)"
+                      />
+                      <div v-else class="camera-media-placeholder">
+                        <span class="icon" aria-hidden="true" v-html="iconMarkup('cameraOff')"></span>
+                        <p class="muted tiny">Streaming non disponibile</p>
+                      </div>
+                      <div
+                        v-if="cameraHasFallback(camera) && cameraHasError(camera)"
+                        class="camera-fallback-chip"
+                      >
+                        <small>Istantanea · {{ fallbackTimestampLabel(camera) }}</small>
+                        <button class="ghost-btn tiny" type="button" @click.stop="refreshCameraFallback(camera)">
+                          Aggiorna
+                        </button>
+                      </div>
+                      <div v-if="cameraHasError(camera) && !cameraHasFallback(camera)" class="camera-media-overlay">
+                        <p class="muted tiny">{{ cameraErrorMessage(camera) }}</p>
+                        <div class="camera-media-actions">
+                          <button class="pill ghost tiny" type="button" @click="refreshCameraFeed(camera)">
+                            Riprova
+                          </button>
+                          <button class="pill ghost tiny" type="button" @click="openCameraSnapshot(camera)">
+                            Istantanea
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="camera-meta">
+                      <div>
+                        <strong>{{ camera.name }}</strong>
+                        <small class="muted tiny">{{ cameraLocationLabel(camera) }}</small>
+                      </div>
+                      <div class="camera-meta-actions">
+                        <button
+                          class="ghost-icon"
+                          type="button"
+                          :title="`Aggiorna ${camera.name}`"
+                          @click.stop="refreshCameraFeed(camera)"
+                        >
+                          <span class="sr-only">Aggiorna streaming</span>
+                          <span class="icon" aria-hidden="true" v-html="iconMarkup('refresh')"></span>
+                        </button>
+                        <button
+                          class="ghost-icon"
+                          type="button"
+                          :title="`Istantanea ${camera.name}`"
+                          @click.stop="openCameraSnapshot(camera)"
+                        >
+                          <span class="sr-only">Mostra istantanea</span>
+                          <span class="icon" aria-hidden="true" v-html="iconMarkup('camera')"></span>
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </section>
+
+              <section v-for="room in assignedCameraRooms" :key="room.id" class="camera-group">
+                <div class="section-head compact">
+                  <div>
+                    <p>{{ room.name }}</p>
+                    <span class="muted tiny">{{ room.cameras.length }} {{ room.cameras.length === 1 ? 'telecamera' : 'telecamere' }}</span>
+                  </div>
+                </div>
+                <div class="camera-mosaic">
+                  <article
+                    v-for="camera in room.cameras"
+                    :key="room.id + '-' + cameraKey(camera)"
+                    :class="[
+                      'camera-card',
+                      'camera-card--mosaic',
+                      cameraFrameState(camera)
+                    ]"
+                  >
+                    <div
+                      class="camera-media"
+                      :class="cameraFrameState(camera)"
+                      role="button"
+                      tabindex="0"
+                      :aria-label="`Apri ${camera.name}`"
+                      @click="handleCameraPrimaryClick(camera)"
+                      @keydown.enter.prevent="handleCameraPrimaryClick(camera)"
+                      @keydown.space.prevent="handleCameraPrimaryClick(camera)"
+                    >
+                      <span class="camera-state-chip" :class="cameraStateChip(camera).tone">
+                        {{ cameraStateChip(camera).label }}
+                      </span>
+                      <img
+                        v-if="!cameraHasError(camera)"
+                        :src="cameraStreamSrc(camera)"
+                        :alt="`Diretta ${camera.name}`"
+                        loading="lazy"
+                        @error="handleCameraError(camera, $event)"
+                        @load="handleCameraFrameLoaded(camera)"
+                        draggable="false"
+                      />
+                      <img
+                        v-else-if="cameraHasFallback(camera)"
+                        :src="cameraFallbackEntry(camera)?.url"
+                        :alt="`Istantanea ${camera.name}`"
+                        loading="lazy"
+                        draggable="false"
+                        @error="refreshCameraFallback(camera)"
+                      />
+                      <div v-else class="camera-media-placeholder">
+                        <span class="icon" aria-hidden="true" v-html="iconMarkup('cameraOff')"></span>
+                        <p class="muted tiny">Streaming non disponibile</p>
+                      </div>
+                      <div
+                        v-if="cameraHasFallback(camera) && cameraHasError(camera)"
+                        class="camera-fallback-chip"
+                      >
+                        <small>Istantanea · {{ fallbackTimestampLabel(camera) }}</small>
+                        <button class="ghost-btn tiny" type="button" @click.stop="refreshCameraFallback(camera)">
+                          Aggiorna
+                        </button>
+                      </div>
+                      <div v-if="cameraHasError(camera) && !cameraHasFallback(camera)" class="camera-media-overlay">
+                        <p class="muted tiny">{{ cameraErrorMessage(camera) }}</p>
+                        <div class="camera-media-actions">
+                          <button class="pill ghost tiny" type="button" @click="refreshCameraFeed(camera)">
+                            Riprova
+                          </button>
+                          <button class="pill ghost tiny" type="button" @click="openCameraSnapshot(camera)">
+                            Istantanea
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="camera-meta">
+                      <div>
+                        <strong>{{ camera.name }}</strong>
+                        <small class="muted tiny">{{ cameraLocationLabel(camera, room.name) }}</small>
+                      </div>
+                      <div class="camera-meta-actions">
+                        <button
+                          class="ghost-icon"
+                          type="button"
+                          :title="`Aggiorna ${camera.name}`"
+                          @click.stop="refreshCameraFeed(camera)"
+                        >
+                          <span class="sr-only">Aggiorna streaming</span>
+                          <span class="icon" aria-hidden="true" v-html="iconMarkup('refresh')"></span>
+                        </button>
+                        <button
+                          class="ghost-icon"
+                          type="button"
+                          :title="`Istantanea ${camera.name}`"
+                          @click.stop="openCameraSnapshot(camera)"
+                        >
+                          <span class="sr-only">Mostra istantanea</span>
+                          <span class="icon" aria-hidden="true" v-html="iconMarkup('camera')"></span>
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </section>
+            </div>
+
+            <div v-else class="empty-state compact">
+              <div class="empty-icon" aria-hidden="true" v-html="iconMarkup('shield')"></div>
+              <h3>Nessuna telecamera rilevata</h3>
+              <p class="muted">Verifica che i dispositivi Home Assistant abbiano l'etichetta <code>tvcc</code> e siano sincronizzati.</p>
+            </div>
+          </section>
         </template>
 
         <template v-else>
@@ -435,6 +673,104 @@
 
     <transition name="fade">
       <div
+        v-if="snapshotPreview.open"
+        class="snapshot-overlay"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeSnapshotModal"
+      >
+        <div class="snapshot-panel card">
+          <header class="panel-head">
+            <div>
+              <p class="eyebrow">Istantanea</p>
+              <h3>{{ (snapshotPreview.camera && snapshotPreview.camera.name) || 'Telecamera' }}</h3>
+              <small class="muted" v-if="snapshotPreview.fetchedAt">
+                {{ formatSnapshotTimestamp(snapshotPreview.fetchedAt) }}
+              </small>
+            </div>
+            <div class="snapshot-actions">
+              <button class="ghost-btn tiny" type="button" @click="refreshSnapshotModal">Aggiorna</button>
+              <button class="ghost-btn icon-only" type="button" @click="closeSnapshotModal" aria-label="Chiudi istantanea">
+                <span class="icon" aria-hidden="true" v-html="iconMarkup('close')"></span>
+              </button>
+            </div>
+          </header>
+          <div class="snapshot-body">
+            <p v-if="snapshotPreview.error" class="snapshot-error">{{ snapshotPreview.error }}</p>
+            <div v-else class="snapshot-media">
+              <img
+                v-if="snapshotPreview.url"
+                :src="snapshotPreview.url"
+                :alt="`Istantanea ${(snapshotPreview.camera && snapshotPreview.camera.name) || ''}`"
+                @load="handleSnapshotLoaded"
+                @error="handleSnapshotError"
+                draggable="false"
+              />
+              <div v-if="snapshotPreview.loading" class="snapshot-placeholder overlay">Caricamento in corso…</div>
+            </div>
+          </div>
+          <footer class="snapshot-footer">
+            <button
+              class="pill ghost tiny"
+              type="button"
+              @click="openCameraSnapshot(snapshotPreview.camera, { external: true })"
+            >
+              Apri in nuova scheda
+            </button>
+          </footer>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="fade">
+      <div
+        v-if="cameraViewer.open"
+        class="camera-viewer-overlay"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeCameraViewer"
+      >
+        <div class="camera-viewer-panel card">
+          <header class="panel-head">
+            <div>
+              <p class="eyebrow">Telecamera live</p>
+              <h3>{{ (cameraViewer.camera && cameraViewer.camera.name) || 'Telecamera' }}</h3>
+              <small class="muted" v-if="cameraViewer.lastRefresh">
+                Agg. {{ formatTime(cameraViewer.lastRefresh) }}
+              </small>
+            </div>
+            <div class="snapshot-actions">
+              <button class="ghost-btn tiny" type="button" @click="refreshCameraViewer">Aggiorna ora</button>
+              <button class="ghost-btn icon-only" type="button" @click="closeCameraViewer" aria-label="Chiudi telecamera">
+                <span class="icon" aria-hidden="true" v-html="iconMarkup('close')"></span>
+              </button>
+            </div>
+          </header>
+          <div class="camera-viewer-body">
+            <div class="camera-viewer-media" :class="{ loading: cameraViewer.loading }">
+              <img
+                v-if="cameraViewer.url"
+                :src="cameraViewer.url"
+                :alt="`Live ${(cameraViewer.camera && cameraViewer.camera.name) || ''}`"
+                @load="handleCameraViewerLoaded"
+                @error="handleCameraViewerError($event)"
+                draggable="false"
+              />
+              <div v-if="cameraViewer.loading" class="camera-viewer-placeholder overlay">
+                Connessione alla telecamera…
+              </div>
+            </div>
+            <p v-if="cameraViewer.error" class="snapshot-error">{{ cameraViewer.error }}</p>
+          </div>
+          <footer class="snapshot-footer">
+            <small class="muted tiny">La diretta si aggiorna automaticamente mentre questa finestra è aperta.</small>
+          </footer>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="fade">
+      <div
         v-if="devicePanel.open"
         class="device-overlay"
         role="dialog"
@@ -561,8 +897,33 @@ const ICONS = {
   close: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 6 12 12M18 6 6 18"/></svg>',
   cloud: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a4 4 0 0 1-.5-8A5.5 5.5 0 0 1 17 7.5a4.5 4.5 0 0 1 .5 9Z"/></svg>',
   cloudOff: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 18 18"/><path d="M18 18H7a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 9.22-4"/></svg>',
-  lan: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="6" rx="1.5"/><path d="M12 9v4"/><rect x="4" y="15" width="6" height="6" rx="1"/><rect x="14" y="15" width="6" height="6" rx="1"/></svg>'
+  lan: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="6" rx="1.5"/><path d="M12 9v4"/><rect x="4" y="15" width="6" height="6" rx="1"/><rect x="14" y="15" width="6" height="6" rx="1"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.36-6.36L21 8"/><path d="M21 4v4h-4"/><path d="M21 12a9 9 0 0 1-15.36 6.36L3 16"/><path d="M3 20v-4h4"/></svg>',
+  camera: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h4.5L10 5h4l1.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  cameraOff: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 5h3l1.5 2H20a2 2 0 0 1 2 2v6.5"/><path d="M3 7h4.5"/><path d="M2 2l20 20"/><path d="M6 19h12a2 2 0 0 0 2-2v-1"/><path d="M9.5 13a2.5 2.5 0 0 0 3.5 3.5"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+  rows: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>'
 }
+
+const defaultSnapshotState = () => ({
+  open: false,
+  camera: null,
+  url: '',
+  fetchedAt: null,
+  loading: false,
+  error: null
+})
+
+const CAMERA_VIEWER_REFRESH_INTERVAL = 15000
+
+const defaultCameraViewerState = () => ({
+  open: false,
+  camera: null,
+  url: '',
+  loading: false,
+  error: null,
+  lastRefresh: null
+})
 
 export default {
   name: 'Dashboard',
@@ -638,7 +999,15 @@ export default {
       colorPresets: ['#ffffff', '#ffe1c4', '#ffd369', '#ffb3c6', '#f7aef8', '#cdb4ff', '#9bf6ff', '#a7ff83'],
       pendingRoomRefresh: null,
       optimisticStates: {},
-      optimisticTimers: {}
+      optimisticTimers: {},
+      cameraErrors: {},
+      cameraStreamSeeds: {},
+      cameraFallbacks: {},
+      cameraRefreshing: {},
+      cameraRefreshTimers: {},
+      snapshotPreview: defaultSnapshotState(),
+      cameraViewer: defaultCameraViewerState(),
+      cameraViewerRefreshTimer: null
     }
   },
   computed: {
@@ -654,12 +1023,13 @@ export default {
             ? room.devices
             : room.id === this.currentRoom
               ? this.devices
-              : []
+              : [],
+          cameras: Array.isArray(room.cameras) ? room.cameras : []
         }))
       }
       if (this.devices.length) {
         const label = this.roomName || 'Ambiente'
-        return [{ id: this.currentRoom || 'default-room', name: label, devices: this.devices }]
+        return [{ id: this.currentRoom || 'default-room', name: label, devices: this.devices, cameras: [] }]
       }
       return []
     },
@@ -721,6 +1091,36 @@ export default {
         ]
       }
       return base[this.activeCategory] || []
+    },
+    uniqueCameraList() {
+      const map = new Map()
+      const source = Array.isArray(this.rooms) && this.rooms.length ? this.rooms : this.structuredRooms
+      source.forEach((room) => {
+        const entries = Array.isArray(room?.cameras) ? room.cameras : []
+        entries.forEach((camera) => {
+          const key = this.cameraKey(camera)
+          if (!key || map.has(key)) return
+          map.set(key, camera)
+        })
+      })
+      return Array.from(map.values())
+    },
+    globalCameraList() {
+      return this.uniqueCameraList.filter((camera) => this.isGlobalCamera(camera))
+    },
+    assignedCameraRooms() {
+      return this.structuredRooms
+        .map((room) => {
+          const scoped = (room.cameras || []).filter((camera) => this.cameraBelongsToRoom(camera, room))
+          return scoped.length ? { id: room.id, name: room.name, cameras: scoped } : null
+        })
+        .filter(Boolean)
+    },
+    hasCameraInventory() {
+      return this.globalCameraList.length > 0 || this.assignedCameraRooms.length > 0
+    },
+    totalCameraCount() {
+      return this.uniqueCameraList.length
     },
     summaryLine() {
       if (!this.hasLights) return 'Nessuna luce rilevata - verifica integrazione.'
@@ -922,6 +1322,7 @@ export default {
         this.syncDevicePanel()
         this.updateWeatherFromDevices()
         this.reconcileOptimisticStates()
+        this.pruneCameraCaches(newRooms)
       },
       deep: true,
       immediate: true
@@ -935,6 +1336,7 @@ export default {
         this.syncDevicePanel()
         this.updateWeatherFromDevices()
         this.reconcileOptimisticStates()
+        this.pruneCameraCaches(this.rooms)
       },
       deep: true,
       immediate: true
@@ -965,6 +1367,8 @@ export default {
     }
     this.clearQueuedRoomRefresh()
     this.clearAllOptimisticTimers()
+    this.clearAllCameraRefreshTimers()
+    this.stopCameraViewerAutorefresh()
   },
   methods: {
     getDirectHaCaller() {
@@ -978,6 +1382,13 @@ export default {
     },
     setCategory(id) {
       this.activeCategory = id
+    },
+    refreshScopedCameras(cameras) {
+      const list = Array.isArray(cameras) ? cameras : []
+      list.forEach((camera) => this.refreshCameraFeed(camera))
+    },
+    refreshAllCameraFeeds() {
+      this.uniqueCameraList.forEach((camera) => this.refreshCameraFeed(camera))
     },
     refreshNow() {
       this.lastRefresh = Date.now()
@@ -1028,6 +1439,398 @@ export default {
         backgroundSize: 'cover',
         backgroundPosition: 'center'
       }
+    },
+    cameraEntityId(camera) {
+      if (!camera) return ''
+      if (typeof camera === 'string') return camera
+      return camera.entity_id || camera.id || ''
+    },
+    cameraKey(camera) {
+      return this.cameraEntityId(camera)
+    },
+    cameraFrameState(camera) {
+      const key = this.cameraKey(camera)
+      if (!key) return ''
+      if (!this.cameraErrors[key]) return 'is-live'
+      return this.cameraFallbacks[key] ? 'has-fallback' : 'has-error'
+    },
+    cameraHasError(camera) {
+      const key = this.cameraKey(camera)
+      if (!key) return false
+      return Boolean(this.cameraErrors[key])
+    },
+    cameraErrorMessage(camera) {
+      const key = this.cameraKey(camera)
+      if (!key) return 'Streaming non disponibile'
+      return this.cameraErrors[key] || 'Streaming non disponibile'
+    },
+    cameraHasFallback(camera) {
+      return Boolean(this.cameraFallbackEntry(camera))
+    },
+    cameraStateChip(camera) {
+      if (this.isCameraRefreshing(camera)) {
+        return { label: 'Aggiorno', tone: 'pending' }
+      }
+      if (this.cameraHasError(camera)) {
+        if (this.cameraHasFallback(camera)) {
+          return { label: 'Snapshot', tone: 'pending' }
+        }
+        return { label: 'Offline', tone: 'alert' }
+      }
+      return { label: 'Live', tone: 'live' }
+    },
+    cameraLocationLabel(camera, roomName = '') {
+      if (this.isGlobalCamera(camera)) return 'Accesso globale'
+      if (roomName) return roomName
+      return 'Stanza dedicata'
+    },
+    isGlobalCamera(camera) {
+      return !camera?.room_id
+    },
+    cameraBelongsToRoom(camera, room) {
+      if (!camera || !room || !camera.room_id || typeof room.id === 'undefined' || room.id === null) {
+        return false
+      }
+      return String(camera.room_id) === String(room.id)
+    },
+    cameraFallbackEntry(camera) {
+      const key = this.cameraKey(camera)
+      if (!key) return null
+      return this.cameraFallbacks[key] || null
+    },
+    fallbackTimestampLabel(camera) {
+      const entry = this.cameraFallbackEntry(camera)
+      if (!entry?.fetchedAt) return 'Ultimo tentativo'
+      const stamp = this.formatTime(entry.fetchedAt)
+      return stamp ? `Agg. ${stamp}` : 'Aggiornamento in corso'
+    },
+    collectCameraIds(roomSource) {
+      const ids = new Set()
+      const rooms = Array.isArray(roomSource) ? roomSource : []
+      rooms.forEach((room) => {
+        const list = Array.isArray(room?.cameras) ? room.cameras : []
+        list.forEach((camera) => {
+          const key = this.cameraKey(camera)
+          if (key) ids.add(key)
+        })
+      })
+      return ids
+    },
+    pruneCameraCaches(roomSource) {
+      const fallback = Array.isArray(this.rooms) ? this.rooms : []
+      const ids = this.collectCameraIds(roomSource && roomSource.length ? roomSource : fallback)
+      if (!ids.size) {
+        if (Object.keys(this.cameraErrors).length) this.cameraErrors = {}
+        if (Object.keys(this.cameraStreamSeeds).length) this.cameraStreamSeeds = {}
+        if (Object.keys(this.cameraFallbacks).length) this.cameraFallbacks = {}
+        this.clearAllCameraRefreshTimers()
+        return
+      }
+      let errorsChanged = false
+      const nextErrors = { ...this.cameraErrors }
+      Object.keys(nextErrors).forEach((key) => {
+        if (!ids.has(key)) {
+          delete nextErrors[key]
+          errorsChanged = true
+        }
+      })
+      if (errorsChanged) {
+        this.cameraErrors = nextErrors
+      }
+      let seedsChanged = false
+      const nextSeeds = { ...this.cameraStreamSeeds }
+      Object.keys(nextSeeds).forEach((key) => {
+        if (!ids.has(key)) {
+          delete nextSeeds[key]
+          seedsChanged = true
+        }
+      })
+      if (seedsChanged) {
+        this.cameraStreamSeeds = nextSeeds
+      }
+      let fallbackChanged = false
+      const nextFallbacks = { ...this.cameraFallbacks }
+      Object.keys(nextFallbacks).forEach((key) => {
+        if (!ids.has(key)) {
+          delete nextFallbacks[key]
+          fallbackChanged = true
+        }
+      })
+      if (fallbackChanged) {
+        this.cameraFallbacks = nextFallbacks
+      }
+
+      let refreshingChanged = false
+      const nextRefreshing = { ...this.cameraRefreshing }
+      const nextTimers = { ...this.cameraRefreshTimers }
+      Object.keys(nextRefreshing).forEach((key) => {
+        if (!ids.has(key)) {
+          delete nextRefreshing[key]
+          refreshingChanged = true
+        }
+      })
+      Object.keys(nextTimers).forEach((key) => {
+        if (!ids.has(key)) {
+          clearTimeout(nextTimers[key])
+          delete nextTimers[key]
+        }
+      })
+      if (refreshingChanged) {
+        this.cameraRefreshing = nextRefreshing
+      }
+      this.cameraRefreshTimers = nextTimers
+    },
+    formatTime(timestamp) {
+      if (!timestamp) return ''
+      const date = new Date(timestamp)
+      if (Number.isNaN(date.getTime())) return ''
+      return new Intl.DateTimeFormat('it-IT', { hour: '2-digit', minute: '2-digit' }).format(date)
+    },
+    formatSnapshotTimestamp(timestamp) {
+      const label = this.formatTime(timestamp)
+      return label ? `Aggiornato alle ${label}` : ''
+    },
+    ensureCameraSeed(cameraId) {
+      if (!cameraId) return Date.now()
+      const current = this.cameraStreamSeeds[cameraId]
+      if (current) return current
+      const seed = Date.now()
+      this.cameraStreamSeeds = { ...this.cameraStreamSeeds, [cameraId]: seed }
+      return seed
+    },
+    refreshCameraSeed(cameraId) {
+      if (!cameraId) return
+      const seed = Date.now()
+      this.cameraStreamSeeds = { ...this.cameraStreamSeeds, [cameraId]: seed }
+    },
+    getAuthToken() {
+      if (typeof window === 'undefined') return ''
+      try {
+        return localStorage.getItem('eface_token') || ''
+      } catch (err) {
+        return ''
+      }
+    },
+    buildCameraUrl(camera, variant = 'stream') {
+      const entityId = this.cameraEntityId(camera)
+      if (!entityId) return ''
+      const params = new URLSearchParams()
+      params.set('seed', this.ensureCameraSeed(entityId))
+      const token = this.getAuthToken()
+      if (token) {
+        params.set('token', token)
+      }
+      return `/api/devices/cameras/${encodeURIComponent(entityId)}/${variant}?${params.toString()}`
+    },
+    appendCacheBust(url, label = 'cb') {
+      if (!url) return ''
+      const connector = url.includes('?') ? '&' : '?'
+      return `${url}${connector}${label}=${Date.now()}`
+    },
+    cameraStreamSrc(camera) {
+      return this.buildCameraUrl(camera, 'stream')
+    },
+    cameraSnapshotUrl(camera) {
+      return this.buildCameraUrl(camera, 'snapshot')
+    },
+    refreshCameraFeed(camera) {
+      const key = this.cameraKey(camera)
+      if (!key) return
+      this.clearCameraError(key)
+      this.clearCameraFallback(key)
+      this.refreshCameraSeed(key)
+      this.flagCameraRefreshing(key)
+    },
+    handleCameraPrimaryClick(camera) {
+      this.openCameraViewer(camera)
+    },
+    handleCameraError(camera, event) {
+      const key = this.cameraKey(camera)
+      if (!key) return
+      const reason = this.describeCameraError(event)
+      this.cameraErrors = { ...this.cameraErrors, [key]: reason }
+      this.primeCameraFallback(camera)
+      this.clearCameraRefreshing(key)
+    },
+    handleCameraFrameLoaded(camera) {
+      const key = this.cameraKey(camera)
+      if (!key) return
+      this.clearCameraRefreshing(key)
+    },
+    clearCameraError(cameraId) {
+      if (!cameraId || !this.cameraErrors[cameraId]) return
+      const next = { ...this.cameraErrors }
+      delete next[cameraId]
+      this.cameraErrors = next
+    },
+    clearCameraFallback(cameraId) {
+      if (!cameraId || !this.cameraFallbacks[cameraId]) return
+      const next = { ...this.cameraFallbacks }
+      delete next[cameraId]
+      this.cameraFallbacks = next
+    },
+    describeCameraError(event) {
+      if (event && event.message) return event.message
+      return 'Streaming non disponibile'
+    },
+    openCameraSnapshot(camera, options = {}) {
+      if (!camera) return
+      const baseUrl = this.cameraSnapshotUrl(camera)
+      if (!baseUrl) return
+      const finalUrl = this.appendCacheBust(baseUrl, options.external ? 'download' : 'modal')
+      if (options.external) {
+        if (typeof window !== 'undefined') {
+          window.open(finalUrl, '_blank', 'noopener,noreferrer')
+        }
+        return
+      }
+      this.snapshotPreview = {
+        ...defaultSnapshotState(),
+        open: true,
+        camera,
+        url: finalUrl,
+        fetchedAt: Date.now(),
+        loading: true
+      }
+    },
+    closeSnapshotModal() {
+      if (!this.snapshotPreview.open) return
+      this.snapshotPreview = defaultSnapshotState()
+    },
+    handleSnapshotLoaded() {
+      if (!this.snapshotPreview.open) return
+      this.snapshotPreview = { ...this.snapshotPreview, loading: false, error: null }
+    },
+    handleSnapshotError() {
+      if (!this.snapshotPreview.open) return
+      this.snapshotPreview = { ...this.snapshotPreview, loading: false, error: 'Impossibile caricare l\'istantanea' }
+    },
+    openCameraViewer(camera) {
+      if (!camera) return
+      const key = this.cameraKey(camera)
+      if (!key) return
+      this.refreshCameraFeed(camera)
+      const rawUrl = this.cameraStreamSrc(camera)
+      if (!rawUrl) {
+        this.cameraViewer = {
+          ...defaultCameraViewerState(),
+          open: true,
+          camera,
+          error: 'Streaming non configurato'
+        }
+        return
+      }
+      const streamUrl = this.appendCacheBust(rawUrl, 'viewer')
+      this.cameraViewer = {
+        ...defaultCameraViewerState(),
+        open: true,
+        camera,
+        url: streamUrl,
+        loading: true,
+        lastRefresh: Date.now()
+      }
+      this.stopCameraViewerAutorefresh()
+      this.startCameraViewerAutorefresh()
+    },
+    closeCameraViewer() {
+      if (!this.cameraViewer.open) return
+      this.stopCameraViewerAutorefresh()
+      this.cameraViewer = defaultCameraViewerState()
+    },
+    refreshCameraViewer() {
+      if (!this.cameraViewer.open || !this.cameraViewer.camera) return
+      const key = this.cameraKey(this.cameraViewer.camera)
+      if (!key) return
+      this.refreshCameraSeed(key)
+      const rawUrl = this.cameraStreamSrc(this.cameraViewer.camera)
+      if (!rawUrl) return
+      const nextUrl = this.appendCacheBust(rawUrl, 'viewer')
+      this.cameraViewer = {
+        ...this.cameraViewer,
+        url: nextUrl,
+        loading: true,
+        error: null,
+        lastRefresh: Date.now()
+      }
+      this.startCameraViewerAutorefresh()
+    },
+    handleCameraViewerLoaded() {
+      if (!this.cameraViewer.open) return
+      this.cameraViewer = { ...this.cameraViewer, loading: false, error: null }
+    },
+    handleCameraViewerError(event) {
+      if (!this.cameraViewer.open) return
+      const message = event?.message || 'Impossibile caricare lo streaming'
+      this.cameraViewer = { ...this.cameraViewer, loading: false, error: message }
+      this.startCameraViewerAutorefresh()
+    },
+    startCameraViewerAutorefresh() {
+      if (!this.cameraViewer.open) return
+      this.stopCameraViewerAutorefresh()
+      this.cameraViewerRefreshTimer = setTimeout(() => {
+        this.refreshCameraViewer()
+      }, CAMERA_VIEWER_REFRESH_INTERVAL)
+    },
+    stopCameraViewerAutorefresh() {
+      if (this.cameraViewerRefreshTimer) {
+        clearTimeout(this.cameraViewerRefreshTimer)
+        this.cameraViewerRefreshTimer = null
+      }
+    },
+    refreshSnapshotModal() {
+      if (!this.snapshotPreview.open || !this.snapshotPreview.camera) return
+      const baseUrl = this.cameraSnapshotUrl(this.snapshotPreview.camera)
+      if (!baseUrl) return
+      this.snapshotPreview = {
+        ...this.snapshotPreview,
+        url: this.appendCacheBust(baseUrl, 'modal'),
+        fetchedAt: Date.now(),
+        loading: true,
+        error: null
+      }
+    },
+    primeCameraFallback(camera) {
+      const key = this.cameraKey(camera)
+      if (!key) return
+      const baseUrl = this.cameraSnapshotUrl(camera)
+      if (!baseUrl) return
+      const entry = { url: this.appendCacheBust(baseUrl, 'fallback'), fetchedAt: Date.now() }
+      this.cameraFallbacks = { ...this.cameraFallbacks, [key]: entry }
+    },
+    refreshCameraFallback(camera) {
+      this.primeCameraFallback(camera)
+    },
+    flagCameraRefreshing(cameraId) {
+      if (!cameraId) return
+      const timer = setTimeout(() => this.clearCameraRefreshing(cameraId), 6000)
+      if (this.cameraRefreshTimers[cameraId]) {
+        clearTimeout(this.cameraRefreshTimers[cameraId])
+      }
+      this.cameraRefreshTimers = { ...this.cameraRefreshTimers, [cameraId]: timer }
+      this.cameraRefreshing = { ...this.cameraRefreshing, [cameraId]: true }
+    },
+    clearCameraRefreshing(cameraId) {
+      if (!cameraId) return
+      if (this.cameraRefreshTimers[cameraId]) {
+        clearTimeout(this.cameraRefreshTimers[cameraId])
+        const nextTimers = { ...this.cameraRefreshTimers }
+        delete nextTimers[cameraId]
+        this.cameraRefreshTimers = nextTimers
+      }
+      if (!this.cameraRefreshing[cameraId]) return
+      const nextRefreshing = { ...this.cameraRefreshing }
+      delete nextRefreshing[cameraId]
+      this.cameraRefreshing = nextRefreshing
+    },
+    isCameraRefreshing(camera) {
+      const key = this.cameraKey(camera)
+      if (!key) return false
+      return Boolean(this.cameraRefreshing[key])
+    },
+    clearAllCameraRefreshTimers() {
+      Object.values(this.cameraRefreshTimers).forEach((timer) => clearTimeout(timer))
+      this.cameraRefreshTimers = {}
+      this.cameraRefreshing = {}
     },
     flattenedDevices() {
       const list = []
@@ -2392,6 +3195,13 @@ h3 {
   transition: background var(--transition-fast), border var(--transition-fast), box-shadow var(--transition-base), transform var(--transition-fast);
 }
 
+.ghost-btn.tiny {
+  padding: 6px 10px;
+  font-size: 12px;
+  height: 34px;
+  border-radius: 10px;
+}
+
 .ghost-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   transform: translateY(-2px);
@@ -2773,7 +3583,534 @@ h3 {
 .device-chip {
   display: flex;
   gap: 10px;
+}
+
+.room-cameras {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.camera-inline-actions {
+  display: flex;
+  gap: 8px;
   align-items: center;
+}
+
+.cameras-board {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.camera-board-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.camera-board-head.minimal {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.camera-board-title {
+  flex: 1;
+  min-width: 200px;
+}
+
+.camera-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.camera-metrics {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.camera-metric {
+  min-width: 96px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.25);
+  text-align: left;
+}
+
+.camera-metric strong {
+  font-size: 22px;
+  display: block;
+}
+
+.camera-hero {
+  min-width: 220px;
+}
+
+.camera-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.layout-toggle {
+  display: inline-flex;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.layout-toggle.compact {
+  border-radius: 14px;
+  padding: 4px;
+}
+
+.camera-summary-pills {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.camera-pill {
+  min-width: 90px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 10px 14px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.camera-pill strong {
+  font-size: 20px;
+}
+
+.camera-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.camera-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.camera-mosaic {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.camera-mosaic.list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cameras-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.cameras-grid.list {
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+}
+
+.camera-card {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.32);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.camera-card--mosaic {
+  padding: 0;
+  gap: 14px;
+}
+
+.camera-card--list {
+  padding: 14px 18px;
+  background: linear-gradient(135deg, rgba(7, 9, 20, 0.85), rgba(3, 4, 12, 0.92));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 12px 28px rgba(5, 7, 20, 0.38);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.camera-card--list .camera-media {
+  flex: 0 0 190px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  min-height: 120px;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.camera-card--list .camera-media img {
+  height: 100%;
+}
+
+.camera-card--list .camera-meta {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.camera-card--list .camera-meta > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.camera-card--list .camera-meta strong {
+  font-size: 1.05rem;
+}
+
+.camera-card--list .camera-meta-actions {
+  justify-content: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.camera-card--list .ghost-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 16px;
+}
+
+.camera-card--list .camera-fallback-chip {
+  right: 12px;
+  bottom: 12px;
+}
+
+@media (max-width: 1024px) {
+  .camera-card--list {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .camera-card--list .camera-media {
+    width: 100%;
+    min-height: 180px;
+  }
+}
+
+@media (max-width: 640px) {
+  .camera-card--list {
+    padding: 14px;
+    gap: 14px;
+    box-shadow: 0 8px 18px rgba(5, 7, 20, 0.28);
+  }
+
+  .camera-card--list .camera-meta {
+    padding: 0;
+    gap: 12px;
+  }
+}
+
+.camera-card--global {
+  border-color: rgba(138, 180, 255, 0.28);
+}
+
+.camera-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.camera-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.camera-head-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.camera-tag {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 2px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.camera-frame {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.4);
+  min-height: 180px;
+  aspect-ratio: 16 / 9;
+}
+
+.camera-frame.has-error {
+  border-color: rgba(255, 120, 120, 0.4);
+}
+
+.camera-frame.has-fallback {
+  border-color: rgba(138, 180, 255, 0.4);
+}
+
+.camera-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(1.05);
+  transition: transform var(--transition-base), filter var(--transition-base);
+}
+
+.camera-card--mosaic .camera-media {
+  position: relative;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(5, 7, 20, 0.5);
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.camera-card--mosaic .camera-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.camera-state-chip {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.camera-state-chip.live {
+  border-color: rgba(102, 255, 166, 0.4);
+  color: #8dffce;
+}
+
+.camera-state-chip.pending {
+  border-color: rgba(255, 211, 99, 0.5);
+  color: #ffe29a;
+}
+
+.camera-state-chip.alert {
+  border-color: rgba(255, 122, 122, 0.5);
+  color: #ff9f9f;
+}
+
+.camera-media-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.camera-media-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 7, 18, 0.82);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px;
+  text-align: center;
+}
+
+.camera-media-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.camera-fallback-chip {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: rgba(5, 7, 16, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+}
+
+.camera-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.camera-meta-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ghost-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform var(--transition-fast), border var(--transition-fast), background var(--transition-fast);
+}
+
+.ghost-icon:hover {
+  transform: translateY(-1px);
+  border-color: rgba(138, 180, 255, 0.5);
+  background: rgba(138, 180, 255, 0.15);
+}
+
+.ghost-btn.compact {
+  gap: 6px;
+  padding-inline: 14px;
+  border-radius: 14px;
+  height: 40px;
+}
+
+.camera-card--mosaic.is-live {
+  border-color: rgba(102, 255, 166, 0.28);
+}
+
+.camera-card--mosaic.has-fallback {
+  border-color: rgba(255, 211, 99, 0.25);
+}
+
+.camera-card--mosaic.has-error {
+  border-color: rgba(255, 122, 122, 0.25);
+}
+
+.camera-card--list.is-live {
+  border-color: rgba(102, 255, 166, 0.4);
+  box-shadow: 0 18px 44px rgba(4, 10, 20, 0.45);
+}
+
+.camera-card--list.has-fallback {
+  border-color: rgba(255, 211, 99, 0.38);
+}
+
+.camera-card--list.has-error {
+  border-color: rgba(255, 122, 122, 0.4);
+  background: linear-gradient(135deg, rgba(35, 7, 16, 0.85), rgba(18, 6, 10, 0.9));
+}
+
+.camera-frame img:hover {
+  transform: scale(1.01);
+  filter: saturate(1.25);
+}
+
+.camera-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 18px;
+  min-height: 180px;
+  text-align: left;
+}
+
+.camera-error-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.camera-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.camera-fallback img {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  aspect-ratio: 16 / 9;
+  height: auto;
+  object-fit: cover;
+}
+
+.camera-fallback-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.icon-pill {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--transition-fast), border var(--transition-fast), transform var(--transition-fast);
+}
+
+.icon-pill.active,
+.icon-pill:hover {
+  background: rgba(138, 180, 255, 0.25);
+  border-color: rgba(138, 180, 255, 0.6);
+  transform: translateY(-1px);
+}
+
+.icon-pill .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.empty-state.compact {
+  text-align: center;
+  gap: 8px;
 }
 
 .device-icon-btn {
@@ -3086,6 +4423,150 @@ h3 {
   transform-origin: bottom right;
 }
 
+.snapshot-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 5, 15, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(16px, 4vw, 60px);
+  z-index: 25;
+  backdrop-filter: blur(22px);
+  animation: overlay-fade 220ms ease-out;
+}
+
+.snapshot-panel {
+  width: min(900px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: overlay-rise 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.camera-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 4, 12, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(16px, 4vw, 60px);
+  z-index: 24;
+  backdrop-filter: blur(26px);
+  animation: overlay-fade 220ms ease-out;
+}
+
+.camera-viewer-panel {
+  width: min(960px, 100%);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: overlay-rise 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.camera-viewer-body {
+  flex: 1;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(5, 7, 16, 0.7);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.camera-viewer-media {
+  position: relative;
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+  min-height: 420px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.camera-viewer-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.camera-viewer-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: rgba(5, 7, 20, 0.6);
+}
+
+.snapshot-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.snapshot-body {
+  flex: 1;
+  min-height: 360px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(5, 7, 20, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.snapshot-media {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.snapshot-body img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.snapshot-placeholder {
+  color: rgba(255, 255, 255, 0.8);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.snapshot-placeholder.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 7, 20, 0.65);
+}
+
+.snapshot-error {
+  color: #ff9f9f;
+  font-weight: 600;
+}
+
+.snapshot-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .panel-head {
   display: flex;
   align-items: flex-start;
@@ -3254,6 +4735,12 @@ h3 {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.section-head.compact {
+  margin-bottom: 0;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .slider-row input[type='range'] {
@@ -3504,10 +4991,30 @@ h3 {
     gap: 10px;
   }
 
+  .cameras-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-frame,
+  .camera-frame img {
+    min-height: 200px;
+    height: 200px;
+  }
+
   .lights-overlay,
   .device-overlay {
     align-items: flex-end;
     justify-content: center;
+  }
+
+  .camera-board-head {
+    flex-direction: column;
+  }
+
+  .camera-summary-pills {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 }
 
@@ -3559,6 +5066,15 @@ h3 {
     max-width: 520px;
     margin: 0 auto;
     min-height: 96px;
+  }
+
+  .camera-frame,
+  .camera-frame img {
+    height: 200px;
+  }
+
+  .camera-summary-pills {
+    justify-content: space-between;
   }
 }
 </style>

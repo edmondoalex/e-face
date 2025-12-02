@@ -2,6 +2,8 @@ import os
 import json
 import asyncio
 import re
+import copy
+from collections import defaultdict
 from fastapi import Header, HTTPException
 from datetime import datetime, timedelta
 import jwt
@@ -400,6 +402,66 @@ def _resolve_room_for_entity(registry_entry: dict | None, attrs: dict | None, de
     return None
 
 
+def _collect_camera_entities(state_map: dict, entity_registry: dict, device_map: dict) -> list[dict]:
+    cameras: list[dict] = []
+    if not isinstance(state_map, dict):
+        return cameras
+    for entity_id, state in state_map.items():
+        if not isinstance(entity_id, str) or not entity_id.startswith('camera.'):
+            continue
+        attrs = (state or {}).get('attributes') or {}
+        registry_entry = entity_registry.get(entity_id) or {}
+        labels = _collect_labels(
+            attrs.get('labels'),
+            attrs.get('tags'),
+            attrs.get('label'),
+            registry_entry.get('labels')
+        )
+        if 'tvcc' not in labels:
+            continue
+        if _should_hide_entity(attrs, registry_entry, labels):
+            continue
+        room_id = _resolve_room_for_entity(registry_entry, attrs, device_map)
+        cameras.append({
+            'id': entity_id,
+            'entity_id': entity_id,
+            'name': attrs.get('friendly_name') or registry_entry.get('name') or entity_id,
+            'state': state.get('state'),
+            'labels': labels,
+            'room_id': room_id,
+            'attributes': {
+                'entity_picture': attrs.get('entity_picture'),
+                'frontend_stream_type': attrs.get('frontend_stream_type'),
+                'supported_features': attrs.get('supported_features')
+            }
+        })
+    return cameras
+
+
+def _attach_cameras_to_rooms(room_list: list, camera_entries: list[dict]) -> list:
+    if not isinstance(room_list, list):
+        return []
+    camera_entries = camera_entries or []
+    cameras_by_room = defaultdict(list)
+    global_cameras: list[dict] = []
+    for camera in camera_entries:
+        room_id = camera.get('room_id')
+        if room_id:
+            cameras_by_room[room_id].append(camera)
+        else:
+            global_cameras.append(camera)
+    for room in room_list:
+        room_id = room.get('id')
+        combined: list[dict] = []
+        specific = cameras_by_room.get(room_id) or []
+        if specific:
+            combined.extend(copy.deepcopy(specific))
+        if global_cameras:
+            combined.extend(copy.deepcopy(global_cameras))
+        room['cameras'] = combined
+    return room_list
+
+
 def _normalize_room_hint(value: str | None) -> str | None:
     if not value:
         return None
@@ -456,7 +518,11 @@ def _gather_light_scenes(state_map: dict, entity_registry: dict, device_map: dic
         domain = entity_id.split('.', 1)[0]
         attrs = (ent or {}).get('attributes') or {}
         registry_entry = entity_registry.get(entity_id) or {}
-        labels = _collect_labels(attrs.get('labels'), attrs.get('tags'), registry_entry.get('labels'))
+        labels = _collect_labels(
+            attrs.get('labels'),
+            attrs.get('tags'),
+            registry_entry.get('labels')
+        )
         _append_light_scene(entity_id, domain, attrs, registry_entry, labels, device_map, scenes_by_room, fallback)
         processed.add(entity_id)
 
@@ -626,10 +692,12 @@ def fetch_ha_rooms(integration: dict, include_meta: bool = False):
     weather_snapshot = _extract_weather_snapshot(state_map, preferred_weather)
     if weather_snapshot:
         weather_snapshot = _enrich_weather_forecast(weather_snapshot, host, token)
+    camera_entries = _collect_camera_entities(state_map, entity_registry, device_map)
 
     # if no synced template is available yet, fall back to legacy discovery logic
     if not tracked_entities or not _has_valid_room_templates(room_templates):
         rooms_only = _legacy_room_fetch(state_map, integration, background_map)
+        rooms_only = _attach_cameras_to_rooms(rooms_only, camera_entries)
         if include_meta:
             return rooms_only, ({'weather': weather_snapshot} if weather_snapshot else {})
         return rooms_only
@@ -688,6 +756,8 @@ def fetch_ha_rooms(integration: dict, include_meta: bool = False):
             'devices': devices,
             'scenes': room_scenes
         })
+
+    rooms = _attach_cameras_to_rooms(rooms, camera_entries)
 
     if include_meta:
         return rooms, ({'weather': weather_snapshot} if weather_snapshot else {})

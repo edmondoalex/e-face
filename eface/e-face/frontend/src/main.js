@@ -34,3 +34,11 @@ const token = localStorage.getItem('eface_token')
 if (token) axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
 
 createApp(App).mount('#app')
+
+if ('serviceWorker' in navigator) {
+	window.addEventListener('load', () => {
+		navigator.serviceWorker
+			.register('/sw.js')
+			.catch((err) => console.warn('[e-face] service worker registration failed', err))
+	})
+}
