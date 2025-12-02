@@ -13,6 +13,13 @@ startup: application
 boot: auto
 ports:
   "8000/tcp": 8000
+  "443/tcp": null
 webui: "http://[HOST]:[PORT:8000]"
-options: {}
-schema: {}
+options:
+  https_enabled: false
+  https_domain: ""
+  https_email: ""
+schema:
+  https_enabled: bool
+  https_domain: str?
+  https_email: str?
