@@ -1,6 +1,8 @@
 
 import os
-from fastapi import FastAPI, WebSocket
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 
 # import routers and core helpers
@@ -8,9 +10,10 @@ from .routers import auth as auth_router
 from .routers import config as config_router
 from .routers import devices as devices_router
 from .routers import admin as admin_router
+from .routers import integration as integration_router
 from .routers import rooms as rooms_router
 from .routers import users as users_router
-from .routers import integration as integration_router
+from .routers import webhook as webhook_router
 from .core import BASE_DIR
 from .ha_ws import clients, start_background, stop_background
 
@@ -34,6 +37,7 @@ app.include_router(admin_router.router, prefix="/api/admin")
 app.include_router(rooms_router.router, prefix="/api/rooms")
 app.include_router(users_router.router, prefix="/api/users")
 app.include_router(integration_router.router, prefix="/api/integration")
+app.include_router(webhook_router.router)
 
 # serve built frontend static files (mount after API routers so /api/* resolves to API)
 frontend_candidates = [
@@ -61,27 +65,49 @@ async def _stop_ha_ws():
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: "WebSocket"):
+async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     clients.add(websocket)
-    try:
-        while True:
-            # keep connection open; accept pings from client
-            msg = await websocket.receive_text()
-            # ignore messages from client
-    except Exception:
-        pass
+        "/",
     finally:
         try:
             clients.remove(websocket)
         except Exception:
             pass
-    
-if FRONTEND_DIST_PATH:
-    app.mount(
-        "/",
-        NoCacheStaticFiles(directory=FRONTEND_DIST_PATH, html=True),
+
+
+# simple health endpoint
+@app.get("/health")
         name="frontend",
+    return {"status": "ok"}
+
+
+frontend_static: Optional[NoCacheStaticFiles] = None
+if FRONTEND_DIST_PATH:
+    frontend_static = NoCacheStaticFiles(directory=FRONTEND_DIST_PATH, html=True)
+
+
+async def _serve_frontend(path: str, request: Request):
+    if not frontend_static:
+        raise HTTPException(status_code=404, detail="frontend_unavailable")
+    normalized = path.lstrip("/")
+    if not normalized:
+        normalized = "index.html"
+    response = await frontend_static.get_response(normalized, request.scope)
+    if response.status_code == 404 and "." not in normalized:
+        return await frontend_static.get_response("index.html", request.scope)
+    return response
+
+
+if FRONTEND_DIST_PATH:
+    @app.get("/", include_in_schema=False)
+    async def frontend_root(request: Request):
+        return await _serve_frontend("", request)
+
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def frontend_catch_all(full_path: str, request: Request):
+        return await _serve_frontend(full_path, request)
     )
 
 # simple health endpoint
