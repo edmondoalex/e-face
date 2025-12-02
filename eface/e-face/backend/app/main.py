@@ -68,18 +68,16 @@ async def _stop_ha_ws():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     clients.add(websocket)
-        "/",
+    try:
+        while True:
+            await websocket.receive_text()
+    except Exception:
+        pass
     finally:
         try:
             clients.remove(websocket)
         except Exception:
             pass
-
-
-# simple health endpoint
-@app.get("/health")
-        name="frontend",
-    return {"status": "ok"}
 
 
 frontend_static: Optional[NoCacheStaticFiles] = None
@@ -108,7 +106,7 @@ if FRONTEND_DIST_PATH:
     @app.get("/{full_path:path}", include_in_schema=False)
     async def frontend_catch_all(full_path: str, request: Request):
         return await _serve_frontend(full_path, request)
-    )
+
 
 # simple health endpoint
 @app.get("/health")
